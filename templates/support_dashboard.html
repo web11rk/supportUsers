@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Support Dashboard</title>
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f5f7fa;
+        }
+        .header {
+            background: #FFA500;
+            color: white;
+            padding: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .container { max-width: 1400px; margin: 20px auto; padding: 0 20px; }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        .stat-card {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+        .stat-number { font-size: 36px; font-weight: bold; color: #667eea; }
+        .stat-label { color: #666; margin-top: 5px; }
+        .tickets-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        .ticket-panel {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .ticket-item {
+            padding: 15px;
+            border: 1px solid #e0e0e0;
+            border-radius: 5px;
+            margin-bottom: 10px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .ticket-item:hover {
+            background: #f5f7fa;
+            border-color: #667eea;
+        }
+        .ticket-header { display: flex; justify-content: space-between; margin-bottom: 10px; }
+        .ticket-id { font-weight: bold; color: #667eea; }
+        .status {
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .status.Open { background: #ffeaa7; color: #d63031; }
+        .status.In.Progress { background: #74b9ff; color: #0984e3; }
+        .status.Resolved { background: #55efc4; color: #00b894; }
+        .priority-badge {
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+            margin-left: 8px;
+        }
+        .priority-badge.CRITICAL { 
+            background: #ff0000; 
+            color: white;
+            animation: pulse 1.5s infinite;
+        }
+        .priority-badge.HIGH { background: #ff6b6b; color: white; }
+        .priority-badge.MEDIUM { background: #ffd93d; color: #333; }
+        .priority-badge.LOW { background: #95e1d3; color: #333; }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; }
+        }
+        .ticket-item.CRITICAL {
+            border-left: 4px solid #ff0000;
+            background: #fff5f5;
+        }
+        .chat-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            z-index: 1000;
+        }
+        .chat-container {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: white;
+            width: 90%;
+            max-width: 800px;
+            height: 85%;
+            border-radius: 10px;
+            display: flex;
+            flex-direction: column;
+        }
+        .chat-header {
+            background: linear-gradient(135deg, #f093fb 0%, #4facfe 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 10px 10px 0 0;
+        }
+        .chat-info {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-top: 10px;
+            font-size: 14px;
+        }
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            background: #f5f7fa;
+        }
+        .message {
+            margin-bottom: 15px;
+            display: flex;
+            flex-direction: column;
+        }
+        .message.user { align-items: flex-start; }
+        .message.support { align-items: flex-end; }
+        .message-bubble {
+            max-width: 70%;
+            padding: 12px 16px;
+            border-radius: 15px;
+            word-wrap: break-word;
+        }
+        .message.user .message-bubble {
+            background: white;
+            color: #333;
+            border-bottom-left-radius: 5px;
+        }
+        .message.support .message-bubble {
+            background: #667eea;
+            color: white;
+            border-bottom-right-radius: 5px;
+        }
+        .message-sender {
+            font-size: 12px;
+            font-weight: 600;
+            margin-bottom: 5px;
+            color: #666;
+        }
+        .message-time {
+            font-size: 11px;
+            color: #999;
+            margin-top: 5px;
+        }
+        .chat-input {
+            display: flex;
+            padding: 20px;
+            background: white;
+            border-top: 1px solid #e0e0e0;
+        }
+        .chat-input input {
+            flex: 1;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 5px;
+            margin-right: 10px;
+        }
+        .btn {
+            padding: 12px 30px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+        }
+        .btn:hover { background: #764ba2; }
+        .btn-success { background: #55efc4; color: #00b894; }
+        .btn-success:hover { background: #00b894; color: white; }
+        .actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        .close-btn {
+            background: transparent;
+            color: white;
+            border: 2px solid white;
+            padding: 5px 15px;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div>
+            <h1>🛠️ Support Dashboard</h1>
+            <p style="opacity: 0.9;">{{ username }}</p>
+            <p id="loadIndicator" style="font-size: 14px; margin-top: 5px;"></p>
+        </div>
+        <form action="/logout" method="POST">
+            <button class="btn" style="background: rgba(255,255,255,0.2);">Logout</button>
+        </form>
+    </div>
+
+    <div class="container">
+        <div class="stats">
+            <div class="stat-card">
+                <div class="stat-number" id="totalTickets">0</div>
+                <div class="stat-label">Total Tickets</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number" id="openTickets">0</div>
+                <div class="stat-label">Open</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number" id="inProgressTickets">0</div>
+                <div class="stat-label">In Progress</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number" id="resolvedTickets">0</div>
+                <div class="stat-label">Resolved</div>
+            </div>
+        </div>
+
+        <div class="tickets-grid">
+            <div class="ticket-panel">
+                <h2>⏳ Pending Tickets</h2>
+                <div id="pendingList"></div>
+            </div>
+            <div class="ticket-panel">
+                <h2>✅ Recently Resolved</h2>
+                <div id="resolvedList"></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="chat-modal" id="chatModal">
+        <div class="chat-container">
+            <div class="chat-header">
+                <div style="display: flex; justify-content: space-between; align-items: start;">
+                    <div>
+                        <h3 id="chatTicketId"></h3>
+                        <p id="chatSubject" style="font-size: 16px; opacity: 0.9;"></p>
+                    </div>
+                    <button class="close-btn" onclick="closeChat()">Close</button>
+                </div>
+                <div class="chat-info">
+                    <div>👤 User: <strong id="chatUser"></strong></div>
+                    <div>📊 Priority: <strong id="chatPriority"></strong></div>
+                    <div>📅 Created: <strong id="chatCreated"></strong></div>
+                    <div>🏷️ Status: <strong id="chatStatus"></strong></div>
+                </div>
+            </div>
+            <div class="chat-messages" id="chatMessages"></div>
+            <div class="chat-input">
+                <input type="text" id="messageInput" placeholder="Type your reply...">
+                <button class="btn" onclick="sendMessage()">Send</button>
+            </div>
+            <div class="actions">
+                <button class="btn" onclick="updateStatus('In Progress')">Mark In Progress</button>
+                <button class="btn btn-success" onclick="updateStatus('Resolved')">Resolve Ticket</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const socket = io();
+        const username = "{{ username }}";
+        let currentTicket = null;
+
+        socket.on('connect', function() {
+            socket.emit('support_join', {username: username});
+            loadAllTickets();
+        });
+
+        socket.on('new_ticket', function(data) {
+            loadAllTickets();
+        });
+
+        socket.on('new_message', function(data) {
+            console.log('Received new_message:', data);
+            console.log('Current ticket:', currentTicket);
+            if (currentTicket && data.ticket_id === currentTicket) {
+                displayMessage(data);
+            }
+        });
+        
+        socket.on('error', function(data) {
+            alert(data.message);
+        });
+
+        socket.on('ticket_updated', function(data) {
+            loadAllTickets();
+        });
+
+        function loadAllTickets() {
+            fetch('/api/support/tickets')
+                .then(r => r.json())
+                .then(tickets => {
+                    updateStats(tickets);
+                    displayPendingTickets(tickets);
+                    displayResolvedTickets(tickets);
+                });
+        }
+
+        function updateStats(tickets) {
+            const openCount = tickets.filter(t => t.status === 'Open').length;
+            const inProgressCount = tickets.filter(t => t.status === 'In Progress').length;
+            const pendingTotal = openCount + inProgressCount;
+            const criticalCount = tickets.filter(t => t.priority === 'CRITICAL' && 
+                                                     (t.status === 'Open' || t.status === 'In Progress')).length;
+            
+            document.getElementById('totalTickets').textContent = tickets.length;
+            document.getElementById('openTickets').textContent = openCount;
+            document.getElementById('inProgressTickets').textContent = inProgressCount;
+            document.getElementById('resolvedTickets').textContent = 
+                tickets.filter(t => t.status === 'Resolved').length;
+            
+            // Update load indicator
+            const loadIndicator = document.getElementById('loadIndicator');
+            let loadText = `📊 ${pendingTotal} pending tickets`;
+            let loadEmoji = '🟢';
+            
+            if (criticalCount > 0) {
+                loadText += ` | ⚠️ ${criticalCount} CRITICAL`;
+                loadEmoji = '🔴';
+            }
+            
+            if (pendingTotal > 50) {
+                loadEmoji = '🔴';
+                loadText += ' | Heavy Load!';
+            } else if (pendingTotal > 20) {
+                loadEmoji = '🟡';
+                loadText += ' | Moderate Load';
+            } else {
+                loadText += ' | Light Load';
+            }
+            
+            loadIndicator.textContent = `${loadEmoji} ${loadText}`;
+        }
+
+        function displayPendingTickets(tickets) {
+            const pending = tickets.filter(t => t.status === 'Open' || t.status === 'In Progress');
+            const list = document.getElementById('pendingList');
+
+            if (pending.length === 0) {
+                list.innerHTML = '<p style="color: #666; padding: 20px; text-align: center;">No pending tickets</p>';
+                return;
+            }
+
+            // Sort by priority: CRITICAL → HIGH → MEDIUM → LOW
+            const priorityOrder = {'CRITICAL': 4, 'HIGH': 3, 'MEDIUM': 2, 'LOW': 1};
+            pending.sort((a, b) => {
+                return (priorityOrder[b.priority] || 0) - (priorityOrder[a.priority] || 0);
+            });
+
+            list.innerHTML = pending.map(t => `
+                <div class="ticket-item ${t.priority}" onclick="openChat('${t.ticket_id}')">
+                    <div class="ticket-header">
+                        <span class="ticket-id">${t.ticket_id}</span>
+                        <span class="priority-badge ${t.priority}">${t.priority}</span>
+                        <span class="status ${t.status.replace(' ', '.')}">${t.status}</span>
+                    </div>
+                    <h4>${t.subject}</h4>
+                    <p style="font-size: 12px; color: #666;">
+                        👤 ${t.user_name} | 💬 ${t.messages.length} messages
+                    </p>
+                </div>
+            `).join('');
+        }
+
+        function displayResolvedTickets(tickets) {
+            const resolved = tickets.filter(t => t.status === 'Resolved').slice(0, 10);
+            const list = document.getElementById('resolvedList');
+
+            if (resolved.length === 0) {
+                list.innerHTML = '<p style="color: #666; padding: 20px; text-align: center;">No resolved tickets</p>';
+                return;
+            }
+
+            list.innerHTML = resolved.map(t => `
+                <div class="ticket-item" onclick="openChat('${t.ticket_id}')">
+                    <div class="ticket-header">
+                        <span class="ticket-id">${t.ticket_id}</span>
+                        <span class="status ${t.status.replace(' ', '.')}">${t.status}</span>
+                    </div>
+                    <h4>${t.subject}</h4>
+                    <p style="font-size: 12px; color: #666;">
+                        👤 ${t.user_name} | 💬 ${t.messages.length}
+                    </p>
+                </div>
+            `).join('');
+        }
+
+        function openChat(ticketId) {
+            currentTicket = ticketId;
+            fetch('/api/ticket/' + ticketId)
+                .then(r => r.json())
+                .then(ticket => {
+                    document.getElementById('chatTicketId').textContent = ticket.ticket_id;
+                    document.getElementById('chatSubject').textContent = ticket.subject;
+                    document.getElementById('chatUser').textContent = ticket.user_name;
+                    document.getElementById('chatPriority').textContent = ticket.priority;
+                    document.getElementById('chatStatus').textContent = ticket.status;
+                    document.getElementById('chatCreated').textContent = 
+                        new Date(ticket.created_at).toLocaleString();
+
+                    document.getElementById('chatMessages').innerHTML = '';
+                    ticket.messages.forEach(msg => displayMessage(msg));
+
+                    document.getElementById('chatModal').style.display = 'block';
+                    socket.emit('join_room', {room: ticketId});
+                });
+        }
+
+        function closeChat() {
+            if (currentTicket) {
+                socket.emit('leave_room', {room: currentTicket});
+                currentTicket = null;
+            }
+            document.getElementById('chatModal').style.display = 'none';
+        }
+
+        function sendMessage() {
+            const input = document.getElementById('messageInput');
+            const message = input.value.trim();
+
+            if (!message || !currentTicket) return;
+
+            console.log('Sending message:', {
+                ticket_id: currentTicket,
+                sender: username,
+                message: message
+            });
+
+            socket.emit('send_message', {
+                ticket_id: currentTicket,
+                sender: username,
+                message: message,
+                sender_type: 'support'
+            });
+
+            input.value = '';
+        }
+
+        function updateStatus(newStatus) {
+            if (!currentTicket) return;
+
+            socket.emit('update_ticket_status', {
+                ticket_id: currentTicket,
+                status: newStatus
+            });
+
+            document.getElementById('chatStatus').textContent = newStatus;
+        }
+
+        function displayMessage(msg) {
+            const messagesDiv = document.getElementById('chatMessages');
+            const messageEl = document.createElement('div');
+            messageEl.className = 'message ' + msg.sender_type;
+            
+            // Check if message is a URL (file/image)
+            const messageText = msg.message;
+            let messageContent = messageText;
+            
+            // If message is a URL (proxy URL /file/... or direct URL)
+            if (messageText.startsWith('/file/') || messageText.startsWith('http://') || messageText.startsWith('https://')) {
+                const url = messageText;
+                // Get extension from URL
+                let extension = '';
+                if (url.startsWith('/file/')) {
+                    extension = 'jpg'; // Default for proxy URLs
+                } else {
+                    extension = url.split('.').pop().toLowerCase().split('?')[0];
+                }
+                
+                if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(extension) || url.startsWith('/file/')) {
+                    // Display as image
+                    messageContent = `<img src="${url}" alt="Uploaded image" style="max-width: 100%; border-radius: 8px; margin-top: 5px; cursor: pointer;" onclick="window.open('${url}', '_blank')">`;
+                } else if (['mp4', 'webm', 'ogg'].includes(extension)) {
+                    // Display as video
+                    messageContent = `<video src="${url}" controls style="max-width: 100%; border-radius: 8px; margin-top: 5px;"></video>`;
+                } else if (['mp3', 'wav', 'ogg'].includes(extension)) {
+                    // Display as audio
+                    messageContent = `<audio src="${url}" controls style="max-width: 100%; margin-top: 5px;"></audio>`;
+                } else {
+                    // Display as clickable link
+                    const displayUrl = url.startsWith('/file/') ? '📎 File' : url;
+                    messageContent = `<a href="${url}" target="_blank" style="color: #667eea; text-decoration: underline;">${displayUrl}</a>`;
+                }
+            }
+            
+            messageEl.innerHTML = `
+                <div class="message-sender">${msg.sender}</div>
+                <div class="message-bubble">${messageContent}</div>
+                <div class="message-time">${new Date(msg.timestamp).toLocaleTimeString()}</div>
+            `;
+            messagesDiv.appendChild(messageEl);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+
+        document.getElementById('messageInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') sendMessage();
+        });
+    </script>
+</body>
+</html>

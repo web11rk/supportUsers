@@ -1,0 +1,1565 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Orange Support - Dashboard</title>
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f5f7fa;
+        }
+        .header {
+            background: #FFA500;
+            color: white;
+            padding: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .header h1 {
+            font-size: 24px;
+            font-weight: 700;
+        }
+        .logo-badge {
+            margin-right: 15px;
+            font-weight: 700;
+            color: #1f2937;
+            font-size: 20px;
+            letter-spacing: 0.05em;
+        }
+        .container { max-width: 1200px; margin: 20px auto; padding: 0 20px; }
+        .ticket-form {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; font-weight: 600; color: #333; }
+        input, textarea, select {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+        textarea { min-height: 100px; resize: vertical; }
+        .btn {
+            padding: 12px 30px;
+            background: #16a349;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 600;
+            transition: all 0.3s;
+        }
+        .btn:hover { 
+            background: #138a3d;
+            transform: translateY(-1px);
+            box-shadow: 0 5px 15px rgba(22, 163, 73, 0.3);
+        }
+        .tickets-list { display: grid; gap: 20px; }
+        .ticket-card {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .ticket-card:hover { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(139, 92, 246, 0.2); }
+        .ticket-header { display: flex; justify-content: space-between; margin-bottom: 10px; }
+        .ticket-id { font-weight: bold; color: #8b5cf6; }
+        .status {
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .status.Open { background: #ffeaa7; color: #d63031; }
+        .status.In.Progress { background: #74b9ff; color: #0984e3; }
+        .status.Resolved { background: #55efc4; color: #00b894; }
+        
+        /* WhatsApp-style Unread Badge for User */
+        .unread-badge {
+            background: #25d366;
+            color: white;
+            font-size: 12px;
+            font-weight: 700;
+            min-width: 24px;
+            height: 24px;
+            border-radius: 12px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0 8px;
+            margin-left: 10px;
+            vertical-align: middle;
+        }
+        
+        .ticket-card.has-unread {
+            border-left: 4px solid #25d366;
+            background: #f0fff4;
+        }
+        
+        .ticket-card.has-unread h3 {
+            font-weight: 700;
+            color: #000;
+        }
+        
+        .chat-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            z-index: 1000;
+        }
+        .chat-container {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: white;
+            width: 90%;
+            max-width: 600px;
+            height: 80%;
+            border-radius: 10px;
+            display: flex;
+            flex-direction: column;
+        }
+        .chat-header {
+            background: #667eea;
+            color: white;
+            padding: 20px;
+            border-radius: 10px 10px 0 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            background: #f5f7fa;
+        }
+        .message {
+            margin-bottom: 15px;
+            display: flex;
+            flex-direction: column;
+        }
+        .message.user { align-items: flex-end; }
+        .message.support { align-items: flex-start; }
+        .message-bubble {
+            max-width: 70%;
+            padding: 12px 16px;
+            border-radius: 15px;
+            word-wrap: break-word;
+        }
+        .message.user .message-bubble {
+            background: #667eea;
+            color: white;
+            border-bottom-right-radius: 5px;
+        }
+        .message.support .message-bubble {
+            background: white;
+            color: #333;
+            border-bottom-left-radius: 5px;
+        }
+        .audio-bubble {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 6px 10px;
+            border-radius: 10px;
+            background: rgba(37, 99, 235, 0.08);
+        }
+        .audio-bubble audio {
+            width: 130px;
+        }
+        .message-time {
+            font-size: 11px;
+            color: #999;
+            margin-top: 5px;
+        }
+        .voice-duration {
+            font-size: 11px;
+            color: #555;
+            margin-top: 4px;
+        }
+        .chat-input {
+            display: flex;
+            align-items: center;
+            padding: 8px 10px;
+            background: #f5f5f5;
+            border-top: 1px solid #e4e6eb;
+            gap: 4px;
+        }
+
+        .chat-input input[type="file"] {
+            display: none;
+        }
+
+        .chat-input .icon-btn {
+            width: 34px;
+            height: 34px;
+            border-radius: 50%;
+            border: none;
+            background: transparent;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #4b5563;
+            font-size: 18px;
+            cursor: pointer;
+            transition: background 0.2s ease, color 0.2s ease;
+        }
+
+        .chat-input .icon-btn:hover {
+            background: rgba(37, 99, 235, 0.12);
+            color: #2563eb;
+        }
+
+        .voice-btn.recording {
+            background: #dc2626;
+            color: white;
+        }
+
+        .call-status {
+            margin-top: 8px;
+            font-size: 12px;
+            color: #374151;
+            min-height: 16px;
+        }
+
+        .chat-input input[type="text"] {
+            flex: 1;
+            padding: 10px 14px;
+            border: none;
+            border-radius: 999px;
+            background: white;
+            font-size: 14px;
+            outline: none;
+            margin: 0;
+            box-shadow: none;
+        }
+
+        .chat-input input[type="text"]:focus {
+            box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.7);
+        }
+
+        .chat-input .send-btn {
+            background: #25d366;
+            border: none;
+            color: white;
+            padding: 8px 16px;
+            border-radius: 999px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 600;
+            transition: background 0.2s;
+            min-width: 48px;
+        }
+
+        .chat-input .send-btn:hover {
+            background: #20ba5a;
+        }
+
+        .chat-input .send-btn:disabled {
+            background: #a0a0a0;
+            cursor: not-allowed;
+        }
+        .close-btn {
+            background: transparent;
+            color: white;
+            border: 2px solid white;
+            padding: 5px 15px;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+
+        /* Mobile Responsive Design */
+        @media (max-width: 768px) {
+            .header {
+                padding: 15px;
+                flex-direction: column;
+                gap: 10px;
+                align-items: flex-start;
+            }
+
+            .header h1 {
+                font-size: 20px;
+            }
+
+            .header form {
+                width: 100%;
+            }
+
+            .header .btn {
+                width: 100%;
+                padding: 10px;
+            }
+
+            .container {
+                padding: 10px;
+                max-width: 100%;
+            }
+
+            .ticket-form {
+                padding: 15px;
+            }
+
+            .ticket-form h2 {
+                font-size: 18px;
+            }
+
+            #pendingWarning {
+                padding: 12px;
+                font-size: 13px;
+            }
+
+            .form-group label {
+                font-size: 14px;
+            }
+
+            input, textarea, select {
+                font-size: 14px;
+                padding: 12px;
+            }
+
+            .btn {
+                padding: 12px;
+                font-size: 14px;
+            }
+
+            .tickets-list {
+                gap: 15px;
+            }
+
+            .ticket-card {
+                padding: 15px;
+            }
+
+            .ticket-card h3 {
+                font-size: 16px;
+            }
+
+            .ticket-id {
+                font-size: 12px;
+            }
+
+            .status {
+                font-size: 10px;
+                padding: 4px 8px;
+            }
+
+            .unread-badge {
+                font-size: 10px;
+                min-width: 20px;
+                height: 20px;
+                padding: 0 6px;
+            }
+
+            /* Chat Modal - Full Screen on Mobile */
+            .chat-container {
+                width: 100%;
+                height: 100%;
+                max-width: 100%;
+                border-radius: 0;
+                top: 0;
+                left: 0;
+                transform: none;
+            }
+
+            .chat-header {
+                padding: 15px;
+                border-radius: 0;
+            }
+
+            .chat-header h3 {
+                font-size: 16px;
+            }
+
+            .chat-header p {
+                font-size: 12px;
+            }
+
+            .chat-messages {
+                padding: 10px;
+            }
+
+            .message-bubble {
+                max-width: 85%;
+                font-size: 14px;
+                padding: 10px 14px;
+            }
+
+            .message-time {
+                font-size: 10px;
+            }
+
+            .chat-input {
+                padding: 6px 8px;
+            }
+
+            .chat-input input[type="text"] {
+                font-size: 14px;
+                padding: 8px 12px;
+            }
+
+            .attach-btn {
+                min-width: 36px;
+                height: 36px;
+                font-size: 20px;
+            }
+
+            .chat-input .send-btn {
+                padding: 8px 16px;
+                font-size: 14px;
+                min-width: 50px;
+            }
+
+            .close-btn {
+                padding: 5px 12px;
+                font-size: 13px;
+            }
+        }
+
+        /* Extra Small Devices (phones < 480px) */
+        @media (max-width: 480px) {
+            .header h1 {
+                font-size: 18px;
+            }
+
+            .ticket-form {
+                padding: 12px;
+            }
+
+            .ticket-form h2 {
+                font-size: 16px;
+            }
+
+            .ticket-card {
+                padding: 12px;
+            }
+
+            .ticket-card h3 {
+                font-size: 14px;
+            }
+
+            .ticket-header {
+                flex-wrap: wrap;
+                gap: 5px;
+            }
+
+            .message-bubble {
+                max-width: 90%;
+                font-size: 13px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div style="display: flex; align-items: center;">
+            <span class="logo-badge">
+                DEMO
+            </span>
+            <div>
+                <h1 style="font-size: 20px;"> {{ username }}</h1>
+            </div>
+        </div>
+        <form action="/logout" method="POST">
+            <button class="btn" style="background: rgba(255,255,255,0.2); padding: 10px 20px;">Logout</button>
+        </form>
+    </div>
+
+    <div class="container">
+        <div class="ticket-form" id="ticketForm">
+            <h2 style="text-align: center;">Create New Ticket</h2>
+            <div id="pendingWarning" style="display: none; background: #fff3cd; border: 2px solid #ffc107; padding: 15px; border-radius: 8px; margin-bottom: 15px; color: #856404;">
+                ⚠️ <strong>You have a pending ticket.</strong><br>
+                Please wait for your current ticket to be resolved before creating a new one.
+            </div>
+            <div id="ticketFormFields">
+                <div class="form-group">
+                    <label>Issue Type</label>
+                    <select id="issueType">
+                        <option value="Login Issue">Login Issue</option>
+                        <option value="Deposit Issue">Deposit Issue</option>
+                        <option value="Withdrawal Issue">Withdrawal Issue</option>
+                        <option value="Other Issue" selected>Other Issue</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Description</label>
+                    <textarea id="description" placeholder="Please describe your issue in detail..." rows="6"></textarea>
+                </div>
+                <button class="btn" id="createTicketBtn" onclick="createTicket()">Create Ticket</button>
+            </div>
+        </div>
+
+        <h2 style="margin-bottom: 20px;">My Tickets</h2>
+        <div class="tickets-list" id="ticketsList"></div>
+    </div>
+
+    <div class="chat-modal" id="chatModal">
+        <div class="chat-container">
+            <div class="chat-header">
+                <div>
+                    <h3 id="chatTicketId"></h3>
+                    <p id="chatSubject" style="font-size: 14px; opacity: 0.9;"></p>
+                </div>
+                <button class="close-btn" onclick="closeChat()">Close</button>
+            </div>
+            <div class="chat-messages" id="chatMessages"></div>
+            <div class="chat-input">
+                <input type="file" id="fileInput" accept="image/*, video/*, audio/*, application/pdf">
+                <button class="attach-btn" onclick="document.getElementById('fileInput').click()" title="Attach file">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M9 16h6v-6h4v6a4 4 0 0 1-4 4H9a4 4 0 0 1-4-4V9a4 4 0 0 1 4-4h6v4H9v7z" fill="currentColor"/>
+                        <path d="M5 9h4V5H9a4 4 0 0 0-4 4z" fill="currentColor" opacity="0.3"/>
+                    </svg>
+                </button>
+                <button class="voice-btn" id="voiceRecordBtn" type="button" title="Record up to 60s voice note">🎤 </button>
+                <!-- <button class="call-btn" onclick="startCall()" id="callSupportBtn" type="button" title="Call support">📞 Call Support new</button> -->
+                <input type="text" id="messageInput" placeholder="Type a message">
+                <button class="send-btn" onclick="sendMessage()" id="sendButton">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M1.101 21.757L23.8 12.028 1.101 2.3l.011 7.912 13.623 1.816-13.623 1.817-.011 7.912z" fill="currentColor"/>
+                    </svg>
+                </button>
+            </div>
+            <div id="callStatusLabel" class="call-status" aria-live="polite"></div>
+        </div>
+    </div>
+
+    <script>
+        const socket = io();
+        const username = "{{ username }}";
+        const userPhone = "{{ phone if phone else username }}"; // User phone for read tracking
+        let currentTicket = null;
+
+        // Unread message tracking for user (keep as fallback, but server handles it now)
+        function getLastSeenTimestamp(ticketId) {
+            const lastSeen = localStorage.getItem(`user_lastSeen_${ticketId}`);
+            return lastSeen || ''; // Return empty string if never seen
+        }
+
+        function setLastSeenTimestamp(ticketId, timestamp) {
+            // Use provided timestamp or current time
+            const timeToSet = timestamp || new Date().toISOString();
+            localStorage.setItem(`user_lastSeen_${ticketId}`, timeToSet);
+            // console.log(`📌 User marked ticket ${ticketId} as read at:`, timeToSet);
+        }
+
+        function markAllMessagesAsRead(ticket) {
+            // Mark all messages in the ticket as read by using the latest message timestamp
+            if (ticket.messages && ticket.messages.length > 0) {
+                const latestMessage = ticket.messages[ticket.messages.length - 1];
+                setLastSeenTimestamp(ticket.ticket_id, latestMessage.timestamp);
+            } else {
+                setLastSeenTimestamp(ticket.ticket_id);
+            }
+        }
+
+        function getUnreadCount(ticket) {
+            const lastSeen = getLastSeenTimestamp(ticket.ticket_id);
+
+            if (!lastSeen) {
+                // Never seen this ticket, count all support messages
+                const count = ticket.messages.filter(msg => msg.sender_type === 'support').length;
+                return count;
+            }
+
+            // Count messages from support that came after last seen
+            const unreadMessages = ticket.messages.filter(msg => {
+                return msg.timestamp > lastSeen && msg.sender_type === 'support';
+            });
+
+            return unreadMessages.length;
+        }
+
+        socket.on('connect', function() {
+            socket.emit('user_join', {username: username});
+            loadTickets();
+        });
+
+        socket.on('ticket_created', function(data) {
+            if (data.user_name === username) {
+                // Clear the fallback timeout since we got the success event
+                if (createTicketTimeout) {
+                    clearTimeout(createTicketTimeout);
+                    createTicketTimeout = null;
+                }
+
+                // Hide loader
+                hideLoader();
+
+                // Re-enable the create button
+                const createBtn = document.getElementById('createTicketBtn');
+                createBtn.disabled = false;
+                createBtn.innerHTML = '<span style="font-size: 16px;">➕</span> Create Ticket';
+                createBtn.style.opacity = '1';
+
+                // Reload ticket list immediately
+                loadTickets();
+
+                // Show success notification
+                const notification = document.createElement('div');
+                notification.style.cssText = `
+                    position: fixed;
+                    top: 80px;
+                    right: 20px;
+                    background: #16a349;
+                    color: white;
+                    padding: 15px 20px;
+                    border-radius: 8px;
+                    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+                    z-index: 10000;
+                    animation: slideIn 0.3s ease-out;
+                    font-weight: 600;
+                `;
+                notification.textContent = '✅ Ticket created successfully!';
+                document.body.appendChild(notification);
+
+                // Remove notification after 3 seconds
+                setTimeout(() => {
+                    notification.style.animation = 'slideOut 0.3s ease-in';
+                    setTimeout(() => notification.remove(), 300);
+                }, 3000);
+
+                // Auto-open chat for newly created ticket with the ticket data
+                openChatWithData(data);
+            }
+        });
+
+        socket.on('ticket_marked_read', function(data) {
+            // console.log('Ticket marked as read:', data.ticket_id);
+            // Immediately refresh ticket list to clear unread badge
+            loadTickets();
+        });
+
+        socket.on('new_message', function(data) {
+            // console.log('Received new_message:', data);
+            // console.log('Current ticket:', currentTicket);
+            if (currentTicket && data.ticket_id === currentTicket) {
+                displayMessage(data);
+                // Mark as read if viewing the ticket - use the message timestamp
+                setLastSeenTimestamp(currentTicket, data.timestamp);
+            }
+            // Update ticket list to show unread count
+            loadTickets();
+        });
+
+        socket.on('error', function(data) {
+            alert(data.message);
+        });
+
+        socket.on('ticket_updated', function(data) {
+            loadTickets();
+            if (currentTicket === data.ticket_id) {
+                // Update status badge in chat if exists
+                const statusEl = document.querySelector('.status');
+                if (statusEl) {
+                    statusEl.textContent = data.status;
+                    statusEl.className = 'status ' + data.status.replace(' ', '.');
+                }
+
+                // Show reopened notification
+                if (data.reopened) {
+                    showReopenedNotification();
+                }
+            }
+        });
+
+        socket.on('ticket_list_update', function(data) {
+            // Real-time update of ticket list (unread counts, etc)
+            console.log('Ticket list update triggered by new message');
+            loadTickets();
+        });
+
+        function showReopenedNotification() {
+            // Create notification element
+            const notification = document.createElement('div');
+            notification.style.cssText = `
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                background: #4CAF50;
+                color: white;
+                padding: 15px 20px;
+                border-radius: 8px;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+                z-index: 10000;
+                font-weight: 600;
+                animation: slideIn 0.3s ease-out;
+            `;
+            notification.innerHTML = `
+                🔄 Ticket Reopened!<br>
+                <span style="font-size: 13px; font-weight: normal;">Your ticket has been reopened and support will respond soon.</span>
+            `;
+
+            // Add animation
+            const style = document.createElement('style');
+            style.textContent = `
+                @keyframes slideIn {
+                    from { transform: translateX(400px); opacity: 0; }
+                    to { transform: translateX(0); opacity: 1; }
+                }
+                @keyframes slideOut {
+                    from { transform: translateX(0); opacity: 1; }
+                    to { transform: translateX(400px); opacity: 0; }
+                }
+            `;
+            document.head.appendChild(style);
+
+            document.body.appendChild(notification);
+
+            // Remove after 4 seconds
+            setTimeout(() => {
+                notification.style.animation = 'slideOut 0.3s ease-in';
+                setTimeout(() => notification.remove(), 300);
+            }, 4000);
+        }
+
+        // Rate limiting: Track last ticket creation time
+        let lastTicketCreationTime = 0;
+        const TICKET_CREATION_COOLDOWN = 5000; // 5 seconds cooldown
+        let createTicketTimeout = null; // Store timeout ID to clear it on success
+
+        function createTicket() {
+            const issueType = document.getElementById('issueType').value;
+            const description = document.getElementById('description').value;
+            const createBtn = document.getElementById('createTicketBtn');
+
+            if (!description) {
+                alert('Please provide a description of your issue');
+                return;
+            }
+
+            // Check if button is disabled (user has pending ticket)
+            if (createBtn.disabled) {
+                alert('⚠️ You already have a pending ticket. Please wait for it to be resolved before creating a new one.');
+                return;
+            }
+
+            // Rate limiting: Check cooldown period
+            const now = Date.now();
+            const timeSinceLastCreation = now - lastTicketCreationTime;
+            if (timeSinceLastCreation < TICKET_CREATION_COOLDOWN) {
+                const remainingSeconds = Math.ceil((TICKET_CREATION_COOLDOWN - timeSinceLastCreation) / 1000);
+                alert(`⚠️ Please wait ${remainingSeconds} more second(s) before creating another ticket.`);
+                return;
+            }
+
+            // Disable button and show loading state
+            createBtn.disabled = true;
+            createBtn.innerHTML = '⏳ Creating Ticket...';
+            createBtn.style.opacity = '0.6';
+
+            // Update last creation time
+            lastTicketCreationTime = now;
+
+            // Show full-screen loader
+            showLoader();
+
+            // Use issue type as the subject
+            socket.emit('create_ticket', {
+                user_name: username,
+                user_phone: userPhone,
+                subject: issueType,
+                description: description,
+                priority: 'MEDIUM'  // Default priority
+            });
+
+            // Reset form
+            document.getElementById('issueType').selectedIndex = 3; // Reset to "Other Issue"
+            document.getElementById('description').value = '';
+
+            // Fallback timeout in case socket event doesn't fire (5 seconds)
+            createTicketTimeout = setTimeout(() => {
+                if (createBtn.disabled) {
+                    hideLoader();
+                    createBtn.disabled = false;
+                    createBtn.innerHTML = '<span style="font-size: 16px;">➕</span> Create Ticket';
+                    createBtn.style.opacity = '1';
+                    // alert('⚠️ Ticket creation is taking longer than expected. Please check your connection.');
+                    loadTickets(); // Try to refresh anyway
+                }
+                createTicketTimeout = null;
+            }, 5000);
+        }
+
+        function showLoader() {
+            const loader = document.createElement('div');
+            loader.id = 'loadingOverlay';
+            loader.style.cssText = `
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: rgba(0, 0, 0, 0.5);
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                z-index: 9999;
+                backdrop-filter: blur(3px);
+            `;
+            loader.innerHTML = `
+                <div style="
+                    background: white;
+                    padding: 30px 40px;
+                    border-radius: 12px;
+                    box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+                    text-align: center;
+                    min-width: 250px;
+                ">
+                    <div style="
+                        border: 4px solid #f3f3f3;
+                        border-top: 4px solid #16a349;
+                        border-radius: 50%;
+                        width: 50px;
+                        height: 50px;
+                        animation: spin 1s linear infinite;
+                        margin: 0 auto 20px;
+                    "></div>
+                    <div style="font-size: 16px; font-weight: 600; color: #333;">Creating your ticket...</div>
+                    <div style="font-size: 13px; color: #666; margin-top: 8px;">Please wait</div>
+                </div>
+            `;
+
+            // Add spinner animation if not already present
+            if (!document.getElementById('spinnerStyle')) {
+                const style = document.createElement('style');
+                style.id = 'spinnerStyle';
+                style.textContent = `
+                    @keyframes spin {
+                        0% { transform: rotate(0deg); }
+                        100% { transform: rotate(360deg); }
+                    }
+                `;
+                document.head.appendChild(style);
+            }
+
+            document.body.appendChild(loader);
+        }
+
+        function hideLoader() {
+            const loader = document.getElementById('loadingOverlay');
+            if (loader) {
+                loader.remove();
+            }
+        }
+
+        function loadTickets() {
+            // Pass user email to get unread counts from Redis
+            fetch(`/api/user/tickets?username=${encodeURIComponent(username)}&user_phone=${encodeURIComponent(userPhone)}`)
+                .then(r => r.json())
+                .then(tickets => {
+                    // Sort tickets: Open tickets first, then by created_at (newest first)
+                    tickets.sort((a, b) => {
+                        // Priority 1: Status (Open/In Progress first)
+                        const statusPriority = {
+                            'Open': 1,
+                            'In Progress': 2,
+                            'Resolved': 3,
+                            'Closed': 4
+                        };
+                        const aPriority = statusPriority[a.status] || 5;
+                        const bPriority = statusPriority[b.status] || 5;
+
+                        if (aPriority !== bPriority) {
+                            return aPriority - bPriority;
+                        }
+
+                        // Priority 2: Created date (newest first)
+                        return new Date(b.created_at) - new Date(a.created_at);
+                    });
+
+                    // Check if user has any pending (open or in-progress) tickets
+                    const hasPendingTicket = tickets.some(t =>
+                        t.status === 'Open' || t.status === 'In Progress'
+                    );
+
+                    // Show/hide form based on pending ticket status
+                    if (hasPendingTicket) {
+                        document.getElementById('pendingWarning').style.display = 'block';
+                        document.getElementById('ticketFormFields').style.opacity = '0.5';
+                        document.getElementById('ticketFormFields').style.pointerEvents = 'none';
+                        document.getElementById('createTicketBtn').disabled = true;
+                    } else {
+                        document.getElementById('pendingWarning').style.display = 'none';
+                        document.getElementById('ticketFormFields').style.opacity = '1';
+                        document.getElementById('ticketFormFields').style.pointerEvents = 'auto';
+                        document.getElementById('createTicketBtn').disabled = false;
+                    }
+
+                    const list = document.getElementById('ticketsList');
+                    list.innerHTML = tickets.map(t => {
+                        // Use unread count from server (Redis-based, synced across devices)
+                        const unreadCount = t.unread_count || 0;
+                        const hasUnreadClass = unreadCount > 0 ? 'has-unread' : '';
+                        const unreadBadge = unreadCount > 0 ? `<span class="unread-badge">${unreadCount}</span>` : '';
+
+                        return `
+                        <div class="ticket-card ${hasUnreadClass}" onclick="openChat('${t.ticket_id}')">
+                            <div class="ticket-header">
+                                <span class="ticket-id">${t.ticket_id} ${unreadBadge}</span>
+                                <span class="status ${t.status.replace(' ', '.')}">${t.status}</span>
+                            </div>
+                            <h3>${t.subject}</h3>
+                            <p style="font-size: 13px; color: #666; margin-top: 8px;">${t.messages.length} messages</p>
+                        </div>
+                    `}).join('');
+                });
+        }
+
+        function openChat(ticketId) {
+            // Close previous chat if open
+            if (currentTicket && currentTicket !== ticketId) {
+                socket.emit('leave_room', {room: currentTicket});
+            }
+
+            currentTicket = ticketId;
+
+            // Immediately mark ticket as read (before fetching messages)
+            markTicketAsReadOnBackend(ticketId);
+
+            fetch('/api/ticket/' + ticketId)
+                .then(r => r.json())
+                .then(ticket => {
+                    displayChatForTicket(ticket);
+                });
+        }
+
+        function openChatWithData(ticket) {
+            // Close previous chat if open
+            if (currentTicket && currentTicket !== ticket.ticket_id) {
+                socket.emit('leave_room', {room: currentTicket});
+            }
+
+            // Immediately mark ticket as read
+            markTicketAsReadOnBackend(ticket.ticket_id);
+
+            // Open chat directly with ticket data (no need to fetch)
+            displayChatForTicket(ticket);
+        }
+
+        function markTicketAsReadOnBackend(ticketId) {
+            // Call backend API to mark ticket as read immediately
+            fetch('/api/mark-read', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    ticket_id: ticketId,
+                    user_identifier: userPhone
+                })
+            })
+            .then(r => r.json())
+            .then(data => {
+                // console.log('✅ Ticket marked as read:', ticketId);
+                // Immediately refresh ticket list to clear unread badge
+                loadTickets();
+            })
+            .catch(err => {
+                console.error('Error marking ticket as read:', err);
+            });
+        }
+
+        function displayChatForTicket(ticket) {
+            currentTicket = ticket.ticket_id;
+            document.getElementById('chatTicketId').textContent = ticket.ticket_id;
+            document.getElementById('chatSubject').textContent = ticket.subject;
+            document.getElementById('chatMessages').innerHTML = '';
+
+            // console.log('Opening chat for ticket:', ticket.ticket_id);
+            // console.log('Ticket has', ticket.messages ? ticket.messages.length : 0, 'messages');
+
+            // Mark all messages as read using the latest message timestamp
+            markAllMessagesAsRead(ticket);
+
+            // Display all messages
+            if (ticket.messages && ticket.messages.length > 0) {
+                ticket.messages.forEach(msg => {
+                    // console.log('Displaying message:', msg);
+                    displayMessage(msg);
+                });
+            } else {
+                console.log('No messages found in ticket');
+            }
+
+            // Handle resolved/closed tickets
+            const messageInput = document.getElementById('messageInput');
+            const sendButton = document.getElementById('sendButton');
+
+            if (ticket.status === 'Resolved' || ticket.status === 'Closed') {
+                // Show info message
+                const infoMsg = document.createElement('div');
+                infoMsg.style.cssText = `
+                    background: #fee2e2;
+                    color: #991b1b;
+                    padding: 15px;
+                    margin: 10px;
+                    border-radius: 8px;
+                    border-left: 4px solid #dc2626;
+                    font-size: 14px;
+                    text-align: center;
+                    font-weight: 600;
+                `;
+                infoMsg.innerHTML = `
+                    🔒 This ticket is <strong>${ticket.status}</strong> and closed.<br>
+                    <small style="font-weight: normal; opacity: 0.9;">Contact support to reopen if needed.</small>
+                `;
+                document.getElementById('chatMessages').appendChild(infoMsg);
+
+                // Disable input and send button
+                messageInput.disabled = true;
+                messageInput.placeholder = 'This ticket is closed';
+                messageInput.style.backgroundColor = '#f3f4f6';
+                messageInput.style.cursor = 'not-allowed';
+
+                sendButton.disabled = true;
+                sendButton.style.opacity = '0.5';
+                sendButton.style.cursor = 'not-allowed';
+                sendButton.textContent = 'Closed';
+            } else {
+                // Enable input and send button for active tickets
+                messageInput.disabled = false;
+                messageInput.placeholder = 'Type your message...';
+                messageInput.style.backgroundColor = 'white';
+                messageInput.style.cursor = 'text';
+
+                sendButton.disabled = false;
+                sendButton.style.opacity = '1';
+                sendButton.style.cursor = 'pointer';
+                sendButton.textContent = 'Send';
+            }
+
+            document.getElementById('chatModal').style.display = 'block';
+            socket.emit('join_room', {room: ticket.ticket_id});
+
+            // Note: Ticket list will auto-refresh when 'ticket_marked_read' event is received from backend
+        }
+
+        function closeChat() {
+            if (currentTicket) {
+                socket.emit('leave_room', {room: currentTicket});
+                currentTicket = null;
+            }
+            document.getElementById('chatModal').style.display = 'none';
+        }
+
+        function sendMessage(messageText = null, bypassCheck = false) {
+            const input = document.getElementById('messageInput');
+            const sendButton = document.getElementById('sendButton');
+            const message = messageText || input.value.trim();
+
+            // Don't send if no message or no ticket
+            if (!message || !currentTicket) {
+                return;
+            }
+
+            // Check if ticket is closed (unless bypassing for file uploads)
+            if (!bypassCheck && (input.disabled || sendButton.disabled)) {
+                if (input.disabled) {
+                    alert('⚠️ This ticket is closed. You cannot send messages.');
+                }
+                return;
+            }
+
+            // console.log('Sending message:', {
+            //     ticket_id: currentTicket,
+            //     sender: username,
+            //     message: message
+            // });
+
+            socket.emit('send_message', {
+                ticket_id: currentTicket,
+                sender: username,
+                message: message,
+                sender_type: 'user'
+            });
+
+            // Mark as read when sending (we've obviously seen support's messages)
+            setLastSeenTimestamp(currentTicket);
+
+            if (!messageText) {
+                input.value = '';
+            }
+
+        const callSupportBtn = document.getElementById('callSupportBtn');
+        const callStatusLabel = document.getElementById('callStatusLabel');
+        let callSessionId = null;
+        let callPeerConnection = null;
+        let callLocalStream = null;
+        let callRemoteAudio = null;
+        let isCallActive = false;
+        let currentCallTarget = null;
+
+        const pcConfig = {
+            iceServers: [
+                { urls: ["stun:stun.l.google.com:19302"] }
+            ]
+        };
+
+        function setCallStatus(text) {
+            if (callStatusLabel) {
+                callStatusLabel.textContent = text || '';
+            }
+        }
+
+        function resetCallButton() {
+            if (callSupportBtn) {
+                callSupportBtn.disabled = false;
+                callSupportBtn.textContent = '📞 Call Support';
+                callSupportBtn.classList.remove('active');
+            }
+            isCallActive = false;
+            callSessionId = null;
+            currentCallTarget = null;
+        }
+
+        let callWaitingTimer = null;
+
+        function showCallAlert(text) {
+            if (text) {
+                alert(text);
+            }
+        }
+
+        async function cleanupCall() {
+            if (callLocalStream) {
+                callLocalStream.getTracks().forEach(track => track.stop());
+                callLocalStream = null;
+            }
+            if (callPeerConnection) {
+                callPeerConnection.close();
+                callPeerConnection = null;
+            }
+            if (callRemoteAudio) {
+                callRemoteAudio.pause();
+                callRemoteAudio.srcObject = null;
+                callRemoteAudio = null;
+            }
+            setCallStatus('');
+            resetCallButton();
+        }
+
+        async function startCall() {
+            if (!currentTicket) {
+                alert('Please open a ticket first.');
+                return;
+            }
+            if (!navigator.mediaDevices?.getUserMedia) {
+                alert('Audio calling requires microphone access.');
+                return;
+            }
+            setCallStatus('Calling support...');
+            console.log('callSupportBtn', callSupportBtn);
+            callSupportBtn.disabled = true;
+            socket.emit('call_request', {
+                ticket_id: currentTicket,
+                user_name: username,
+                user_phone: userPhone
+            });
+            if (callWaitingTimer) {
+                clearTimeout(callWaitingTimer);
+            }
+            callWaitingTimer = setTimeout(() => {
+                setCallStatus('Support did not respond yet.');
+            }, 5000);
+        }
+
+        function endCall() {
+            if (callSessionId) {
+                socket.emit('call_end', { session_id: callSessionId });
+            }
+            cleanupCall();
+        }
+        console.log('callSupportBtn', callSupportBtn);
+        if (callSupportBtn) {
+            console.log('callSupportBtn', callSupportBtn);
+            callSupportBtn.addEventListener('click', () => {
+                if (isCallActive) {
+                    endCall();
+                } else {
+                    startCall();
+                }
+            });
+        }
+
+        socket.on('call_status', data => {
+            if (!data || !data.status) return;
+            if (data.status === 'busy' || data.status === 'unavailable') {
+                setCallStatus(data.message);
+                resetCallButton();
+                if (callWaitingTimer) {
+                    clearTimeout(callWaitingTimer);
+                    callWaitingTimer = null;
+                }
+                showCallAlert(data.message || 'Support is unavailable right now.');
+            } else if (data.status === 'ringing') {
+                setCallStatus('Ringing support...');
+                if (callSupportBtn) {
+                    callSupportBtn.disabled = true;
+                }
+            } else if (data.status === 'rejected') {
+                setCallStatus(data.message || 'Support declined the call');
+                resetCallButton();
+            }
+        });
+
+        socket.on('call_accepted', async data => {
+            callSessionId = data.session_id;
+            currentCallTarget = data.support_sid;
+            setCallStatus('Setting up call...');
+            if (callSupportBtn) {
+                callSupportBtn.textContent = 'End Call';
+                callSupportBtn.classList.add('active');
+                callSupportBtn.disabled = false;
+            }
+            isCallActive = true;
+            await startUserWebRTC(data.support_sid);
+        });
+
+        socket.on('call_ended', () => {
+            setCallStatus('Call has ended');
+            cleanupCall();
+        });
+
+        socket.on('call_status', data => {
+            if (data.status === 'rejected') {
+                setCallStatus(data.message || 'Support declined the call');
+                resetCallButton();
+                if (callWaitingTimer) {
+                    clearTimeout(callWaitingTimer);
+                    callWaitingTimer = null;
+                }
+            }
+        });
+
+        socket.on('webrtc_answer', async data => {
+            if (!callPeerConnection || !data.sdp) return;
+            await callPeerConnection.setRemoteDescription({ type: 'answer', sdp: data.sdp });
+        });
+
+        socket.on('webrtc_ice', async data => {
+            if (!callPeerConnection || !data.candidate) return;
+            try {
+                await callPeerConnection.addIceCandidate(data.candidate);
+            } catch (err) {
+                console.error('Failed to add ICE candidate:', err);
+            }
+        });
+
+        async function startUserWebRTC(targetSid) {
+            try {
+                callLocalStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                callRemoteAudio = new Audio();
+                callRemoteAudio.autoplay = true;
+
+                callPeerConnection = new RTCPeerConnection(pcConfig);
+                callPeerConnection.onicecandidate = event => {
+                    if (event.candidate) {
+                        socket.emit('webrtc_ice', {
+                            target_sid: targetSid,
+                            candidate: event.candidate
+                        });
+                    }
+                };
+                callPeerConnection.ontrack = event => {
+                    if (callRemoteAudio) {
+                        callRemoteAudio.srcObject = event.streams[0];
+                    }
+                };
+
+                callLocalStream.getTracks().forEach(track => {
+                    callPeerConnection.addTrack(track, callLocalStream);
+                });
+
+                const offer = await callPeerConnection.createOffer();
+                await callPeerConnection.setLocalDescription(offer);
+                socket.emit('webrtc_offer', {
+                    target_sid: targetSid,
+                    sdp: offer.sdp,
+                    session_id: callSessionId
+                });
+            } catch (err) {
+                console.error('Unable to start WebRTC', err);
+                setCallStatus('Unable to start call');
+                resetCallButton();
+            }
+        }
+        }
+
+        // Handle file upload
+        const voiceRecordBtn = document.getElementById('voiceRecordBtn');
+        const MAX_VOICE_DURATION_MS = 60 * 1000;
+        let userVoiceRecorder = null;
+        let userVoiceStream = null;
+        let userVoiceChunks = [];
+        let userVoiceStart = 0;
+        let userVoiceTimeout = null;
+        let userVoiceInterval = null;
+        const voiceLabel = '🎤 ';
+
+        function updateVoiceButton(label) {
+            if (voiceRecordBtn) {
+                voiceRecordBtn.textContent = label;
+            }
+        }
+
+        if (voiceRecordBtn) {
+            voiceRecordBtn.addEventListener('click', () => {
+                if (userVoiceRecorder && userVoiceRecorder.state === 'recording') {
+                    stopUserVoiceRecording();
+                } else {
+                    startUserVoiceRecording();
+                }
+            });
+        }
+
+        async function startUserVoiceRecording() {
+            if (!currentTicket) {
+                alert('Please open a ticket before recording a voice note.');
+                return;
+            }
+            if (!navigator.mediaDevices?.getUserMedia) {
+                alert('Audio recording is not supported in your browser.');
+                return;
+            }
+            if (typeof MediaRecorder === 'undefined') {
+                alert('Voice recording is not supported in your browser.');
+                return;
+            }
+
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                userVoiceStream = stream;
+                userVoiceChunks = [];
+                userVoiceStart = Date.now();
+                userVoiceRecorder = new MediaRecorder(stream);
+
+                userVoiceRecorder.ondataavailable = e => {
+                    if (e.data && e.data.size) {
+                        userVoiceChunks.push(e.data);
+                    }
+                };
+
+                userVoiceRecorder.onstop = handleUserVoiceStop;
+                userVoiceRecorder.start();
+
+                updateVoiceButton('Recording... 0s');
+                voiceRecordBtn?.classList.add('recording');
+
+                userVoiceInterval = setInterval(() => {
+                    const elapsed = Math.min(60, Math.floor((Date.now() - userVoiceStart) / 1000));
+                    updateVoiceButton(`Recording... ${elapsed}s`);
+                }, 1000);
+
+                userVoiceTimeout = setTimeout(() => stopUserVoiceRecording(), MAX_VOICE_DURATION_MS);
+            } catch (err) {
+                console.error('Voice recording failed', err);
+                alert('We could not access your microphone. Please allow microphone access and try again.');
+            }
+        }
+
+        function stopUserVoiceRecording() {
+            if (!userVoiceRecorder) {
+                return;
+            }
+
+            clearTimeout(userVoiceTimeout);
+            userVoiceTimeout = null;
+            clearInterval(userVoiceInterval);
+            userVoiceInterval = null;
+
+            if (userVoiceRecorder.state === 'recording') {
+                userVoiceRecorder.stop();
+            }
+        }
+
+        async function handleUserVoiceStop() {
+            voiceRecordBtn?.classList.remove('recording');
+            if (userVoiceStream) {
+                userVoiceStream.getTracks().forEach(track => track.stop());
+                userVoiceStream = null;
+            }
+
+            if (!userVoiceChunks.length) {
+                updateVoiceButton(voiceLabel);
+                return;
+            }
+
+            const durationMs = Math.min(MAX_VOICE_DURATION_MS, Date.now() - userVoiceStart);
+            const durationSec = durationMs / 1000;
+            const blob = new Blob(userVoiceChunks, { type: userVoiceChunks[0]?.type || 'audio/webm' });
+
+            updateVoiceButton('Uploading...');
+            voiceRecordBtn.disabled = true;
+
+            try {
+                const uploadUrl = await uploadVoiceBlob(blob, durationSec);
+                socket.emit('send_message', {
+                    ticket_id: currentTicket,
+                    sender: username,
+                    message: uploadUrl,
+                    sender_type: 'user',
+                    voice_duration: durationSec.toFixed(1)
+                });
+            } catch (err) {
+                console.error(err);
+                alert('Voice note upload failed. Please try again.');
+            } finally {
+                voiceRecordBtn.disabled = false;
+                updateVoiceButton(voiceLabel);
+            }
+            userVoiceRecorder = null;
+        }
+
+        async function uploadVoiceBlob(blob, duration) {
+            const formData = new FormData();
+            formData.append('files', blob, `voice-${Date.now()}.webm`);
+            formData.append('voice_duration', duration.toFixed(1));
+
+            const response = await fetch('/upload_image', {
+                method: 'POST',
+                body: formData
+            });
+            const data = await response.json();
+            if (!response.ok || data.error) {
+                throw new Error(data.error || 'Upload failed');
+            }
+            return data.urls;
+        }
+
+        document.getElementById('fileInput').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            if (!currentTicket) {
+                alert('⚠️ Please select a ticket first');
+                e.target.value = ''; // Reset file input
+                return;
+            }
+
+            // Show uploading indicator
+            const input = document.getElementById('messageInput');
+            const originalPlaceholder = input.placeholder;
+            input.placeholder = '📤 Uploading file...';
+            input.disabled = true;
+
+            // Create FormData
+            const formData = new FormData();
+            formData.append('files', file);
+
+            // Upload file
+            fetch('/upload_image', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    alert('Error uploading file: ' + data.error);
+                    input.placeholder = originalPlaceholder;
+                    input.disabled = false;
+                    return;
+                }
+
+                // Get the URL from response
+                const fileUrl = data.urls;
+                // console.log('File uploaded:', fileUrl);
+
+                // Send the URL as a message (bypass ticket closed check for file uploads)
+                sendMessage(fileUrl, true); // true = bypass check
+
+                // Reset file input and restore input
+                e.target.value = '';
+                input.placeholder = originalPlaceholder;
+                input.disabled = false;
+            })
+            .catch(error => {
+                console.error('Error uploading file:', error);
+                alert('Error uploading file. Please try again.');
+                input.placeholder = originalPlaceholder;
+                input.disabled = false;
+                e.target.value = ''; // Reset file input
+            });
+        });
+
+        function displayMessage(msg) {
+            const messagesDiv = document.getElementById('chatMessages');
+            const messageEl = document.createElement('div');
+            messageEl.className = 'message ' + msg.sender_type;
+            
+            // Check if message is a URL (file/image)
+            const messageText = msg.message;
+            let messageContent = messageText;
+            
+            // If message is a URL (proxy URL /file/... or direct URL)
+            if (messageText.startsWith('/file/') || messageText.startsWith('http://') || messageText.startsWith('https://')) {
+                const url = messageText;
+                // Get extension from URL (for proxy URLs, check the original file type)
+                let extension = '';
+                if (url.startsWith('/file/')) {
+                    // For proxy URLs, we'll detect type from the response or use a generic approach
+                    // Try to get extension from the URL if it was preserved, otherwise detect from content
+                    extension = 'jpg'; // Default, will be handled by browser
+                } else {
+                    extension = url.split('.').pop().toLowerCase().split('?')[0];
+                }
+                
+                const isVoiceNote = msg.attachment_type === 'voice' || msg.voice_duration;
+                const durationLabel = msg.voice_duration ? `<span class="voice-duration">🎤 ${Number(msg.voice_duration).toFixed(1)}s</span>` : '';
+
+                if (isVoiceNote) {
+                    messageContent = `
+                        <div class="audio-bubble">
+                            <audio src="${url}" controls></audio>
+                            ${durationLabel}
+                        </div>
+                    `;
+                } else if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(extension) || url.startsWith('/file/')) {
+                    // Display as image (proxy URLs default to images)
+                    messageContent = `<img src="${url}" alt="Uploaded image" style="max-width: 100%; border-radius: 8px; margin-top: 5px;">`;
+                } else if (['mp4', 'webm', 'ogg'].includes(extension)) {
+                    // Display as video
+                    messageContent = `<video src="${url}" controls style="max-width: 100%; border-radius: 8px; margin-top: 5px;"></video>`;
+                } else if (['mp3', 'wav', 'ogg'].includes(extension)) {
+                    // Display as audio
+                    messageContent = `<audio src="${url}" controls style="max-width: 100%; margin-top: 5px;"></audio>`;
+                } else {
+                    // Display as clickable link
+                    const displayUrl = url.startsWith('/file/') ? '📎 File' : url;
+                    messageContent = `<a href="${url}" target="_blank" style="color: #667eea; text-decoration: underline;">${displayUrl}</a>`;
+                }
+            }
+            
+            messageEl.innerHTML = `
+                <div class="message-bubble">${messageContent}</div>
+                <div class="message-time">${new Date(msg.timestamp).toLocaleTimeString()}</div>
+            `;
+            messagesDiv.appendChild(messageEl);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+
+        document.getElementById('messageInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') sendMessage();
+        });
+    </script>
+</body>
+</html>

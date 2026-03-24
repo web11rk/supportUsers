@@ -1,0 +1,1832 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Orange Support - Admin Dashboard</title>
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f0f2f5;
+            overflow: hidden;
+        }
+        
+        /* Header */
+        .header {
+            background: #FFA500;
+            color: white;
+            padding: 15px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        
+        .logo-badge {
+            margin-right: 15px;
+        }
+        .logo-badge img {
+            height: 35px;
+            width: auto;
+            vertical-align: middle;
+        }
+        
+        /* Main Container - WhatsApp Style */
+        .container {
+            display: flex;
+            height: calc(100vh - 60px);
+            max-width: 100%;
+            margin: 0;
+        }
+        
+        /* Left Sidebar - Ticket List */
+        .sidebar {
+            width: 380px;
+            background: white;
+            border-right: 1px solid #e0e0e0;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        
+        /* Search Box */
+        .search-box {
+            padding: 15px;
+            background: #f0f2f5;
+            border-bottom: 1px solid #e0e0e0;
+        }
+        
+        .search-input {
+            width: 100%;
+            padding: 10px 15px;
+            border: 1px solid #ddd;
+            border-radius: 20px;
+            font-size: 14px;
+            background: white;
+        }
+        
+        .search-input:focus {
+            outline: none;
+            border-color: #8b5cf6;
+        }
+        
+        /* Filter Tabs */
+        .filter-tabs {
+            display: flex;
+            background: white;
+            border-bottom: 1px solid #e0e0e0;
+            padding: 0 10px;
+        }
+        
+        .filter-tab {
+            padding: 12px 15px;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            font-size: 13px;
+            color: #667;
+            transition: all 0.3s;
+        }
+        
+        .filter-tab.active {
+            color: #667eea;
+            border-bottom-color: #667eea;
+            font-weight: 600;
+        }
+        
+        .filter-tab:hover {
+            background: #f5f5f5;
+        }
+        
+        /* Ticket List */
+        .ticket-list {
+            flex: 1;
+            overflow-y: auto;
+            background: white;
+        }
+        
+        .ticket-item {
+            padding: 15px;
+            border-bottom: 1px solid #f0f0f0;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: start;
+            gap: 12px;
+        }
+        
+        .ticket-item:hover {
+            background: #f5f7fa;
+        }
+        
+        .ticket-item.active {
+            background: #e8f4f8;
+            border-left: 4px solid #667eea;
+        }
+        
+        .ticket-item.CRITICAL {
+            border-left: 4px solid #ff0000;
+            background: #fff5f5;
+        }
+        
+        .ticket-item.CRITICAL:hover {
+            background: #ffe5e5;
+        }
+        
+        .ticket-avatar {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: 600;
+            font-size: 18px;
+            flex-shrink: 0;
+        }
+        
+        .ticket-content {
+            flex: 1;
+            min-width: 0;
+        }
+        
+        .ticket-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 5px;
+        }
+        
+        .ticket-user {
+            font-weight: 600;
+            color: #111;
+            font-size: 15px;
+        }
+        
+        .ticket-time {
+            font-size: 11px;
+            color: #999;
+        }
+        
+        .ticket-subject {
+            font-size: 14px;
+            color: #333;
+            margin-bottom: 3px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        
+        .ticket-preview {
+            font-size: 13px;
+            color: #667;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        
+        .ticket-meta {
+            display: flex;
+            gap: 8px;
+            margin-top: 5px;
+            align-items: center;
+        }
+
+        .ticket-ip {
+            font-size: 11px;
+            color: #777;
+        }
+        
+        .priority-badge {
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 10px;
+            font-weight: 600;
+        }
+        
+        .priority-badge.CRITICAL { 
+            background: #ff0000; 
+            color: white;
+            animation: pulse 1.5s infinite;
+        }
+        .priority-badge.HIGH { background: #ff6b6b; color: white; }
+        .priority-badge.MEDIUM { background: #ffd93d; color: #333; }
+        .priority-badge.LOW { background: #95e1d3; color: #333; }
+        
+        .status-badge {
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 10px;
+            font-weight: 600;
+        }
+        
+        .status-badge.Open { background: #ffeaa7; color: #d63031; }
+        .status-badge.In.Progress { background: #74b9ff; color: #0984e3; }
+        .status-badge.Resolved { background: #55efc4; color: #00b894; }
+        
+        .message-count {
+            font-size: 11px;
+            color: #999;
+        }
+        
+        /* WhatsApp-style Unread Badge */
+        .unread-badge {
+            background: #25d366;
+            color: white;
+            font-size: 11px;
+            font-weight: 700;
+            min-width: 20px;
+            height: 20px;
+            border-radius: 10px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0 6px;
+            margin-left: auto;
+            animation: pulse 1.5s infinite;
+        }
+        
+        /* Enhanced unread badge with NEW indicator */
+        .unread-badge.new-message {
+            background: #ff0000;
+            animation: pulseRed 1s infinite;
+            box-shadow: 0 0 10px rgba(255, 0, 0, 0.5);
+        }
+        
+        .ticket-item.has-unread {
+            background: #f0f7ff;
+            border-left: 4px solid #25d366;
+        }
+        
+        .ticket-item.has-unread .ticket-user {
+            font-weight: 700;
+            color: #000;
+        }
+        
+        .ticket-item.has-unread .ticket-preview {
+            color: #000;
+            font-weight: 600;
+        }
+        
+        /* Right Side - Chat Window */
+        .chat-area {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background: #e5ddd5;
+            background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect fill="%23f0f0f0" width="100" height="100"/><circle fill="%23e0e0e0" cx="50" cy="50" r="20" opacity="0.1"/></svg>');
+            overflow: hidden;
+            min-height: 0;
+        }
+        
+        .chat-placeholder {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: #999;
+            font-size: 18px;
+        }
+        
+        /* Chat Header */
+        .chat-header {
+            background: #f0f2f5;
+            padding: 15px 20px;
+            border-bottom: 1px solid #ddd;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .chat-user-info {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        
+        .chat-avatar {
+            width: 45px;
+            height: 45px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: 600;
+            font-size: 16px;
+        }
+        
+        .chat-user-details h3 {
+            font-size: 16px;
+            color: #111;
+            margin-bottom: 2px;
+        }
+        
+        .chat-user-details p {
+            font-size: 12px;
+            color: #667;
+        }
+        
+        .chat-actions {
+            display: flex;
+            gap: 10px;
+        }
+        
+        /* Chat Messages */
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            overflow-x: hidden;
+            padding: 20px;
+            padding-bottom: 30px;
+            min-height: 0;
+            max-height: 100%;
+        }
+        
+        .message {
+            margin-bottom: 15px;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .message.user { align-items: flex-start; }
+        .message.support { align-items: flex-end; }
+        
+        .message-bubble {
+            max-width: 65%;
+            padding: 10px 14px;
+            border-radius: 8px;
+            word-wrap: break-word;
+            position: relative;
+        }
+        
+        .message.user .message-bubble {
+            background: white;
+            color: #111;
+            border-radius: 0 8px 8px 8px;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+        }
+        
+        .message.support .message-bubble {
+            background: #dcf8c6;
+            color: #111;
+            border-radius: 8px 0 8px 8px;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+        }
+        
+        .message-time {
+            font-size: 10px;
+            color: #999;
+            margin-top: 3px;
+            text-align: right;
+        }
+        
+        .message.user .message-time {
+            text-align: left;
+        }
+
+        .audio-bubble {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 6px 10px;
+            border-radius: 10px;
+            background: rgba(37, 99, 235, 0.1);
+        }
+
+        .audio-bubble audio {
+            width: 140px;
+        }
+
+        .voice-duration {
+            font-size: 11px;
+            color: #555;
+            margin-top: 4px;
+        }
+        
+        /* Chat Input */
+        .chat-input {
+            background: #f0f2f5;
+            padding: 20px;
+            border-top: 1px solid #ddd;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        
+        .chat-input input {
+            flex: 1;
+            padding: 10px 15px;
+            border: 1px solid #ddd;
+            border-radius: 20px;
+            font-size: 14px;
+            background: white;
+        }
+        
+        .chat-input input:focus {
+            outline: none;
+            border-color: #8b5cf6;
+        }
+        
+        .btn {
+            padding: 10px 20px;
+            background: #16a349;
+            color: white;
+            border: none;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: all 0.3s;
+        }
+        
+        .btn:hover { 
+            background: #138a3d;
+            transform: translateY(-1px);
+            box-shadow: 0 5px 15px rgba(22, 163, 73, 0.3);
+        }
+
+        .voice-btn {
+            padding: 10px 16px;
+            margin-left: 8px;
+            background: #2563eb;
+            color: white;
+            border: none;
+            border-radius: 20px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .voice-btn.recording {
+            background: #dc2626;
+        }
+        .incoming-call-banner {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            position: sticky;
+            top: 0;
+            background: #f0f9ff;
+            padding: 10px 15px;
+            border: 1px solid #93c5fd;
+            border-radius: 12px;
+            margin: 10px;
+            box-shadow: 0 4px 10px rgba(59, 130, 246, 0.15);
+            gap: 12px;
+        }
+        
+        .btn-small {
+            padding: 6px 12px;
+            font-size: 12px;
+        }
+        
+        /* User History Panel */
+        .history-panel {
+            position: fixed;
+            right: -400px;
+            top: 60px;
+            width: 380px;
+            height: calc(100vh - 60px);
+            background: white;
+            box-shadow: -2px 0 10px rgba(0,0,0,0.1);
+            transition: right 0.3s ease;
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .history-panel.open {
+            right: 0;
+        }
+        
+        .history-header {
+            padding: 15px 20px;
+            background: #f0f2f5;
+            border-bottom: 1px solid #ddd;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .history-header h3 {
+            font-size: 16px;
+            margin: 0;
+        }
+        
+        .history-close {
+            background: none;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            color: #666;
+            padding: 0;
+            width: 30px;
+            height: 30px;
+        }
+        
+        .history-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 15px;
+        }
+        
+        .history-ticket {
+            background: #f8f9fa;
+            padding: 12px;
+            margin-bottom: 10px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+            border-left: 3px solid #16a349;
+        }
+        
+        .history-ticket:hover {
+            background: #e9ecef;
+            transform: translateX(-3px);
+        }
+        
+        .history-ticket.current {
+            background: #e8f5e9;
+            border-left-color: #b91c1b;
+        }
+        
+        .history-ticket-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 5px;
+        }
+        
+        .history-ticket-id {
+            font-weight: 600;
+            color: #16a349;
+            font-size: 13px;
+        }
+        
+        .history-ticket-status {
+            font-size: 11px;
+            padding: 2px 8px;
+            border-radius: 10px;
+        }
+        
+        .history-ticket-subject {
+            font-size: 13px;
+            color: #333;
+            margin-bottom: 5px;
+        }
+        
+        .history-ticket-meta {
+            font-size: 11px;
+            color: #666;
+            display: flex;
+            justify-content: space-between;
+        }
+        
+        .history-empty {
+            text-align: center;
+            padding: 40px 20px;
+            color: #999;
+        }
+        
+        .btn-success { background: #55efc4; color: #00b894; }
+        .btn-success:hover { background: #00b894; color: white; }
+        
+        /* Animations */
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; }
+        }
+        
+        @keyframes pulseRed {
+            0%, 100% { 
+                transform: scale(1);
+                opacity: 1;
+            }
+            50% { 
+                transform: scale(1.1);
+                opacity: 0.8;
+            }
+        }
+        
+        /* Scrollbar */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        
+        ::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+        
+        ::-webkit-scrollbar-thumb {
+            background: #888;
+            border-radius: 3px;
+        }
+        
+        ::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+        
+        /* No tickets message */
+        .no-tickets {
+            text-align: center;
+            padding: 40px 20px;
+            color: #999;
+        }
+        
+        .load-indicator {
+            font-size: 13px;
+            opacity: 0.9;
+        }
+        
+        /* Notification animations */
+        @keyframes slideIn {
+            from { 
+                transform: translateX(400px);
+                opacity: 0;
+            }
+            to { 
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+        
+        @keyframes slideOut {
+            from { 
+                transform: translateX(0);
+                opacity: 1;
+            }
+            to { 
+                transform: translateX(400px);
+                opacity: 0;
+            }
+        }
+        .logo-badge {
+            margin-right: 15px;
+            font-weight: 700;
+            color: white;
+            font-size: 20px;
+            letter-spacing: 0.05em;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div style="display: flex; align-items: center; gap: 15px;">
+            <span class="logo-badge">
+                <span class="logo-badge">
+                ORANGE
+            </span>
+            </span>
+            <div>
+                <h2 style="font-size: 20px; font-weight: 700;">🛠️ Support Dashboard</h2>
+                <div class="load-indicator" id="loadIndicator">Loading...</div>
+            </div>
+        </div>
+        <div style="display: flex; gap: 15px; align-items: center;">
+            <div style="text-align: right;">
+                <div style="font-size: 12px; opacity: 0.9;">Admin</div>
+                <div style="font-weight: 600;">{{ username }}</div>
+            </div>
+            <form action="/logout" method="POST" style="margin: 0;">
+                <button class="btn btn-small" style="background: rgba(255,255,255,0.2);">Logout</button>
+            </form>
+        </div>
+    </div>
+
+    <div class="container">
+        <!-- Left Sidebar - Ticket List -->
+        <div class="sidebar">
+            <!-- Search Box -->
+            <div class="search-box">
+                <input 
+                    type="text" 
+                    class="search-input" 
+                    id="searchInput" 
+                placeholder="🔍 Search by phone, user ID, ticket ID, or subject... (searches all tickets)"
+                    onkeyup="filterTickets()"
+                >
+                <div id="searchIndicator" style="display: none; margin-top: 8px; padding: 6px 10px; background: #fff3cd; border-radius: 6px; font-size: 12px; color: #856404; text-align: center;">
+                    🔍 Searching ALL tickets (including old/resolved)
+                </div>
+            </div>
+            
+            <!-- Filter Tabs -->
+            <div class="filter-tabs">
+                <div class="filter-tab active" onclick="setFilter('all')">
+                    All <span id="countAll">0</span>
+                </div>
+                <div class="filter-tab" onclick="setFilter('open')">
+                    Open <span id="countOpen">0</span>
+                </div>
+                <div class="filter-tab" onclick="setFilter('inprogress')">
+                    In Progress <span id="countInProgress">0</span>
+                </div>
+                <div class="filter-tab" onclick="setFilter('critical')">
+                    ⚠️ Critical <span id="countCritical">0</span>
+                </div>
+            </div>
+            
+            <!-- Ticket List -->
+            <div class="ticket-list" id="ticketList">
+                <div class="no-tickets">No tickets found</div>
+            </div>
+        </div>
+
+        <!-- Right Side - Chat Area -->
+        <div class="chat-area" id="chatArea">
+            <div class="chat-placeholder">
+                👈 Select a ticket to start chatting
+            </div>
+            <div class="incoming-call-banner" id="incomingCallBanner" style="display:none;">
+                <span id="incomingCallText">Incoming call</span>
+                <div style="display:flex; gap:8px; margin-left:auto;">
+                    <button class="voice-btn" id="acceptCallBtn">Accept</button>
+                    <button class="voice-btn" id="rejectCallBtn" style="background:#8b5cf6;">Decline</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const socket = io();
+        const username = "{{ username }}";
+        const userEmail = "{{ username }}"; // Support email for read tracking
+        let allTickets = [];
+        let currentTicket = null;
+        let currentFilter = 'all';
+        let currentPage = 1;
+        let currentMeta = {};
+        let hasMoreTickets = false;
+        
+        // Unread message tracking (keep as fallback, but server handles it now)
+        function getLastSeenTimestamp(ticketId) {
+            const lastSeen = localStorage.getItem(`support_lastSeen_${ticketId}`);
+            return lastSeen || ''; // Return empty string if never seen
+        }
+        
+        function setLastSeenTimestamp(ticketId, timestamp) {
+            // Use provided timestamp or current time
+            const timeToSet = timestamp || new Date().toISOString();
+            localStorage.setItem(`support_lastSeen_${ticketId}`, timeToSet);
+            console.log(`📌 Support marked ticket ${ticketId} as read at:`, timeToSet);
+        }
+        
+        function markAllMessagesAsRead(ticket) {
+            // Mark all messages in the ticket as read by using the latest message timestamp
+            if (ticket.messages && ticket.messages.length > 0) {
+                const latestMessage = ticket.messages[ticket.messages.length - 1];
+                setLastSeenTimestamp(ticket.ticket_id, latestMessage.timestamp);
+            } else {
+                setLastSeenTimestamp(ticket.ticket_id);
+            }
+        }
+        
+        function markTicketAsReadOnBackend(ticketId) {
+            // Call backend API to mark ticket as read immediately
+            console.log('📌 Marking ticket as read:', ticketId);
+            fetch('/api/mark-read', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    ticket_id: ticketId,
+                    user_identifier: 'support'  // Use 'support' identifier
+                })
+            })
+            .then(r => r.json())
+            .then(data => {
+                console.log('✅ Ticket marked as read:', ticketId, data);
+                // Immediately refresh ticket list to clear unread badge
+                loadAllTickets();
+            })
+            .catch(err => {
+                console.error('Error marking ticket as read:', err);
+            });
+        }
+        
+        function getUnreadCount(ticket) {
+            const lastSeen = getLastSeenTimestamp(ticket.ticket_id);
+            
+            if (!lastSeen) {
+                // Never seen this ticket, count all user messages
+                const count = ticket.messages.filter(msg => msg.sender_type === 'user').length;
+                return count;
+            }
+            
+            // Count messages from users that came after last seen
+            const unreadMessages = ticket.messages.filter(msg => {
+                return msg.timestamp > lastSeen && msg.sender_type === 'user';
+            });
+            
+            return unreadMessages.length;
+        }
+
+        socket.on('connect', function() {
+            socket.emit('support_join', {username: username});
+            loadAllTickets();
+        });
+
+        socket.on('new_ticket', function(data) {
+            console.log('🎫 New ticket created:', data.ticket_id);
+            
+            // Reload ticket list
+            loadAllTickets();
+            
+            // Show notification
+            const notification = document.createElement('div');
+            notification.style.cssText = `
+                position: fixed;
+                top: 80px;
+                right: 20px;
+                background: #16a349;
+                color: white;
+                padding: 15px 20px;
+                border-radius: 8px;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+                z-index: 10000;
+                animation: slideIn 0.3s ease-out;
+                font-weight: 600;
+                cursor: pointer;
+            `;
+            notification.innerHTML = `
+                🎫 <strong>New Ticket!</strong><br>
+                <small>${data.ticket_id} - ${data.user_name}</small>
+            `;
+            
+            // Click to open ticket
+            notification.onclick = function() {
+                openChat(data.ticket_id, null);
+                notification.remove();
+            };
+            
+            document.body.appendChild(notification);
+            
+            // Auto-remove after 10 seconds
+            setTimeout(() => {
+                notification.style.animation = 'slideOut 0.3s ease-in';
+                setTimeout(() => notification.remove(), 300);
+            }, 10000);
+            
+            // Play notification sound (optional)
+            try {
+                const audio = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBTGH0fPTgjMGHm7A7+OZQQ0PVKvi7rdlHAU7k9r00X8qBSh+zO/aizYHI2+98OScRA0PWKzn77BdGAU/ltr01IEtBSd8y+7ekDYHJXC/7+KYQAwRWK7m77JfGQU9k9n00n0pBSh8yO3cjTYHJ3C98N+WQgwRWbDm77NfGQU+lNj00H0pBSZ5x+3bjDUHJnG+8OCWQg0RWbDl77RgGgQ+k9f0z3woBSh6yOzajDQHKHK+8N+VQAwPWa/l77RhGgQ/ktb0znsoBSh7x+vaizcGKHK98N+UQQsPV67k7rVjGgM/ktXzzXsoBSZ7x+vaizcGKHK+8OCWQQwPV6vl8LRiGgM/kNTzznsoBSZ6xuvajDcHKHK/8OCVQAwQWKzl8LRiGgM+jdPzznsmBSZ6xu3cjTcHKHO/8N+UQAwQWKzl8LJiGgM+i9DzzXsmBSh7xu3cjDcHKHO+8OGVQQwQWKzl8LJiGgM9itDzzHomBSh7x+3cizcHKHO+8OGVQQwQWK3l8LJhGQM9iM/zzHomBSl7x+3dizcHKHS+8OGVQQ0QWK3l8LJhGQM9h87zzXklBSp8x+3djDcHKHS/8OGVQQ0QWK7l8LJhGQM9h83zzXklBSp8x+3djDcHKHS/8OGVQQ0QWK7l8LJhGQM9h8/zzXkkBSp8yO3djDcHKHW/8OGVQQ0QWK7l8LJhGQM9h8/zzXkkBSp8yO3djDcHKHW/8OGVQQ0QWK7l8LJhGQM9h8/zzXkkBSp8yO3djDcHKHW/8OGVQQ0QWK7l8LJhGQM9h8/zzXkkBSp8yO3djDcHKHW/8OGVQQ0QWK7l8LJhGQM9h8/zzXkkBSp8yO3djDcHKHW/8OGVQQ0QWK7l8LJhGQM9h8/zzXkkBSp8yO3djDcHKHW/8OGVQQ0QWK7l8LJhGQM9h8/zzXkkBSp8yO3djDcHKHW/8OGVQQ0QWK7l8LJhGQ==');
+                audio.volume = 0.3;
+                audio.play().catch(() => {}); // Ignore if autoplay blocked
+            } catch(e) {}
+        });
+
+        socket.on('ticket_marked_read', function(data) {
+            console.log('Ticket marked as read:', data.ticket_id);
+            // Immediately refresh ticket list to clear unread badge
+            loadAllTickets();
+        });
+
+        socket.on('new_message', function(data) {
+            console.log('Received new_message:', data);
+            if (currentTicket && data.ticket_id === currentTicket) {
+                displayMessage(data);
+                // Mark as read if viewing the ticket - use the message timestamp
+                setLastSeenTimestamp(currentTicket, data.timestamp);
+                // Mark as read on backend when viewing
+                markTicketAsReadOnBackend(currentTicket);
+            } else {
+                // If not viewing this ticket, show notification for new unread message
+                if (data.sender_type === 'user') {
+                    showNewMessageNotification(data.ticket_id, data.sender, data.message);
+                }
+            }
+            // Update ticket preview in list (includes unread count)
+            loadAllTickets();
+        });
+
+        socket.on('ticket_updated', function(data) {
+            loadAllTickets();
+            
+            // Show notification if ticket was reopened
+            if (data.reopened) {
+                showReopenedNotification(data.ticket_id);
+            }
+        });
+        
+        socket.on('ticket_reopened', function(data) {
+            // Specific event for ticket reopening
+            loadAllTickets();
+            showReopenedNotification(data.ticket_id, data.user_name);
+        });
+        
+        socket.on('ticket_list_update', function(data) {
+            // Real-time update of ticket list (unread counts, etc)
+            console.log('Ticket list update triggered by new message');
+            // Force refresh to get updated unread counts
+            loadAllTickets();
+        });
+        
+        socket.on('error', function(data) {
+            alert(data.message);
+        });
+        
+        function showReopenedNotification(ticketId, userName) {
+            // Create notification element
+            const notification = document.createElement('div');
+            notification.style.cssText = `
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                background: #FF9800;
+                color: white;
+                padding: 15px 20px;
+                border-radius: 8px;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+                z-index: 10000;
+                font-weight: 600;
+                animation: slideIn 0.3s ease-out;
+                cursor: pointer;
+            `;
+            
+            const userInfo = userName ? ` by ${userName}` : '';
+            notification.innerHTML = `
+                🔄 <strong>Ticket Reopened!</strong><br>
+                <span style="font-size: 13px; font-weight: normal;">${ticketId}${userInfo} - Click to view</span>
+            `;
+            
+            // Add click handler to open ticket
+            notification.onclick = () => {
+                openChat(ticketId, null);
+                notification.remove();
+            };
+            
+            // Add animation
+            if (!document.getElementById('notification-styles')) {
+                const style = document.createElement('style');
+                style.id = 'notification-styles';
+                style.textContent = `
+                    @keyframes slideIn {
+                        from { transform: translateX(400px); opacity: 0; }
+                        to { transform: translateX(0); opacity: 1; }
+                    }
+                    @keyframes slideOut {
+                        from { transform: translateX(0); opacity: 1; }
+                        to { transform: translateX(400px); opacity: 0; }
+                    }
+                `;
+                document.head.appendChild(style);
+            }
+            
+            document.body.appendChild(notification);
+            
+            // Play notification sound (optional)
+            try {
+                const audio = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBDGH0fPTgjMGHm7A7+OZUQ0MUqzn77BdGAg+ltryxnMnBSyBzvLZiTYIGWi77OaaSwcNUazp8LRfGgk7ldv0yXIqBih+zPPaizsIGGS48OmfUw0OUqzn77ReGgk8l9v0yHIpBSh9y/PaizsIGGS48OmfUw0OUq'); 
+                audio.volume = 0.3;
+                audio.play();
+            } catch(e) {}
+            
+            // Remove after 6 seconds
+            setTimeout(() => {
+                notification.style.animation = 'slideOut 0.3s ease-in';
+                setTimeout(() => notification.remove(), 300);
+            }, 6000);
+        }
+
+        function showNewMessageNotification(ticketId, sender, message) {
+            // Create notification element
+            const notification = document.createElement('div');
+            notification.style.cssText = `
+                position: fixed;
+                top: 80px;
+                right: 20px;
+                background: #25d366;
+                color: white;
+                padding: 15px 20px;
+                border-radius: 8px;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+                z-index: 10000;
+                animation: slideIn 0.3s ease-out;
+                font-weight: 600;
+                cursor: pointer;
+                max-width: 300px;
+            `;
+            notification.innerHTML = `
+                💬 <strong>New Message!</strong><br>
+                <small style="font-size: 12px; opacity: 0.9;">${ticketId} - ${sender}</small><br>
+                <small style="font-size: 11px; opacity: 0.8; display: block; margin-top: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${message.substring(0, 50)}${message.length > 50 ? '...' : ''}</small>
+            `;
+            
+            // Click to open ticket
+            notification.onclick = function() {
+                openChat(ticketId, null);
+                notification.remove();
+            };
+            
+            document.body.appendChild(notification);
+            
+            // Auto-remove after 5 seconds
+            setTimeout(() => {
+                notification.style.animation = 'slideOut 0.3s ease-in';
+                setTimeout(() => notification.remove(), 300);
+            }, 5000);
+        }
+
+        function loadAllTickets(includeAll = false, searchTerm = '') {
+            currentPage = 1;
+            const statusQuery = includeAll || searchTerm ? 'all' : 'active';
+            const pageSize = includeAll ? 200 : 80;
+            const params = new URLSearchParams({
+                support_email: userEmail,
+                status: statusQuery,
+                page: currentPage,
+                page_size: pageSize
+            });
+
+            if (searchTerm) {
+                params.set('search', searchTerm);
+            }
+
+            console.log('🔍 Loading tickets with params:', params.toString());
+            fetch(`/api/support/tickets?${params.toString()}`)
+                .then(r => r.json())
+                .then(data => {
+                    const tickets = data.tickets || [];
+                    currentMeta = data.meta || {};
+                    hasMoreTickets = !!currentMeta.has_more;
+                    allTickets = tickets;
+                    // Debug: Log unread counts
+                    tickets.forEach(t => {
+                        if (t.unread_count > 0) {
+                            console.log(`📬 Ticket ${t.ticket_id}: ${t.unread_count} unread messages`);
+                        }
+                    });
+                    updateCounts(tickets);
+                    filterTickets();
+                });
+        }
+
+        function updateCounts(tickets) {
+            const pending = tickets.filter(t => t.status === 'Open' || t.status === 'In Progress');
+            const openCount = tickets.filter(t => t.status === 'Open').length;
+            const inProgressCount = tickets.filter(t => t.status === 'In Progress').length;
+            const criticalCount = tickets.filter(t => t.priority === 'CRITICAL' && 
+                                                     (t.status === 'Open' || t.status === 'In Progress')).length;
+            
+            document.getElementById('countAll').textContent = `(${pending.length})`;
+            document.getElementById('countOpen').textContent = `(${openCount})`;
+            document.getElementById('countInProgress').textContent = `(${inProgressCount})`;
+            document.getElementById('countCritical').textContent = `(${criticalCount})`;
+            
+            // Update load indicator
+            const loadIndicator = document.getElementById('loadIndicator');
+            let loadEmoji = '🟢';
+            let loadText = `${pending.length} pending`;
+            
+            if (criticalCount > 0) {
+                loadEmoji = '🔴';
+                loadText += ` | ${criticalCount} critical`;
+            } else if (pending.length > 50) {
+                loadEmoji = '🔴';
+            } else if (pending.length > 20) {
+                loadEmoji = '🟡';
+            }
+            
+            if (hasMoreTickets) {
+                loadText += " · more tickets available";
+            }
+            
+            loadIndicator.textContent = `${loadEmoji} ${loadText}`;
+        }
+
+        function setFilter(filter) {
+            currentFilter = filter;
+            
+            // Update active tab
+            document.querySelectorAll('.filter-tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            event.target.closest('.filter-tab').classList.add('active');
+            
+            filterTickets();
+        }
+
+        let isSearching = false;
+        
+        function filterTickets() {
+            const searchTerm = document.getElementById('searchInput').value.toLowerCase().trim();
+            const searchIndicator = document.getElementById('searchIndicator');
+            
+            // Show/hide search indicator
+            if (searchTerm) {
+                searchIndicator.style.display = 'block';
+            } else {
+                searchIndicator.style.display = 'none';
+            }
+            
+            // If user is searching, load ALL tickets (including old/resolved ones)
+            if (searchTerm && !isSearching) {
+                isSearching = true;
+                loadAllTickets(true, searchTerm);  // Load all tickets including resolved/closed
+                return;
+            } else if (!searchTerm && isSearching) {
+                isSearching = false;
+                loadAllTickets(false);  // Back to active tickets only
+                return;
+            }
+            
+            let filtered = allTickets.filter(t => {
+                // Filter by status (only if NOT searching)
+                if (!searchTerm) {
+                    if (currentFilter === 'open' && t.status !== 'Open') return false;
+                    if (currentFilter === 'inprogress' && t.status !== 'In Progress') return false;
+                    if (currentFilter === 'critical' && t.priority !== 'CRITICAL') return false;
+                    if (currentFilter === 'all' && t.status !== 'Open' && t.status !== 'In Progress') return false;
+                }
+                
+                // Filter by search term (searches ALL tickets when searchTerm exists)
+                if (searchTerm) {
+                    const matchesUser = t.user_name.toLowerCase().includes(searchTerm);
+                    const matchesUserId = (t.user_id || '').toLowerCase().includes(searchTerm);
+                    const matchesTicket = t.ticket_id.toLowerCase().includes(searchTerm);
+                    const matchesSubject = t.subject.toLowerCase().includes(searchTerm);
+                    const matchesDescription = (t.description || '').toLowerCase().includes(searchTerm);
+                    
+                    // Also match email domains (e.g., searching "gmail" finds "user@gmail.com")
+                    const matchesEmail = t.user_name.toLowerCase().includes(searchTerm) || 
+                                        t.user_name.toLowerCase().split('@')[1]?.includes(searchTerm);
+                    
+                    if (!matchesUser && !matchesUserId && !matchesTicket && !matchesSubject && !matchesDescription && !matchesEmail) {
+                        return false;
+                    }
+                }
+                
+                return true;
+            });
+            
+            // Sort by status, priority, and date
+            const priorityOrder = {'CRITICAL': 4, 'HIGH': 3, 'MEDIUM': 2, 'LOW': 1};
+            const statusPriority = {
+                'Open': 1,
+                'In Progress': 2,
+                'Resolved': 3,
+                'Closed': 4
+            };
+            
+            filtered.sort((a, b) => {
+                // Priority 1: Status (Open/In Progress first)
+                const aStatusPriority = statusPriority[a.status] || 5;
+                const bStatusPriority = statusPriority[b.status] || 5;
+                
+                if (aStatusPriority !== bStatusPriority) {
+                    return aStatusPriority - bStatusPriority;
+                }
+                
+                // Priority 2: If searching, sort by date (newest first)
+                if (searchTerm) {
+                    return new Date(b.created_at) - new Date(a.created_at);
+                }
+                
+                // Priority 3: Sort by priority
+                const aPriority = priorityOrder[a.priority] || 0;
+                const bPriority = priorityOrder[b.priority] || 0;
+                
+                if (aPriority !== bPriority) {
+                    return bPriority - aPriority;
+                }
+                
+                // Priority 4: Sort by date (newest first)
+                return new Date(b.created_at) - new Date(a.created_at);
+            });
+            
+            displayTickets(filtered);
+        }
+
+        function displayTickets(tickets) {
+            const list = document.getElementById('ticketList');
+            
+            if (tickets.length === 0) {
+                list.innerHTML = '<div class="no-tickets">No tickets found</div>';
+                return;
+            }
+            
+            list.innerHTML = tickets.map(t => {
+                const initials = t.user_name.substring(0, 2).toUpperCase();
+            const lastMsgObj = t.messages.length > 0 ? t.messages[t.messages.length - 1] : null;
+            let previewText = t.description || '';
+
+            if (lastMsgObj) {
+                if (lastMsgObj.attachment_type === 'voice' || lastMsgObj.voice_duration) {
+                    const duration = lastMsgObj.voice_duration ? Number(lastMsgObj.voice_duration).toFixed(1) : 'unknown';
+                    previewText = `🎤 Voice note · ${duration}s`;
+                } else if (lastMsgObj.message) {
+                    const textValue = lastMsgObj.message;
+                    if (textValue.startsWith('/file/')) {
+                        previewText = '📎 Attachment';
+                    } else {
+                        previewText = textValue;
+                    }
+                }
+            }
+
+            const preview = previewText.substring(0, 50) + (previewText.length > 50 ? '...' : '');
+                const time = formatTime(t.updated_at);
+                const activeClass = currentTicket === t.ticket_id ? 'active' : '';
+                const userLabel = t.user_phone ? `${t.user_name} (${t.user_phone})` : t.user_name;
+                
+                // Use unread count from server (Redis-based, synced across devices)
+                const unreadCount = t.unread_count || 0;
+                const hasUnreadClass = unreadCount > 0 ? 'has-unread' : '';
+                
+                // Enhanced unread badge with count and NEW indicator
+                let unreadBadge = '';
+                if (unreadCount > 0) {
+                    const badgeClass = unreadCount > 0 ? 'new-message' : '';
+                    unreadBadge = `
+                        <span class="unread-badge ${badgeClass}" title="${unreadCount} unread message${unreadCount > 1 ? 's' : ''}">
+                            ${unreadCount > 99 ? '99+' : unreadCount}
+                        </span>
+                    `;
+                }
+                
+                return `
+                    <div class="ticket-item ${t.priority} ${activeClass} ${hasUnreadClass}" onclick="openChat('${t.ticket_id}', this)">
+                        <div class="ticket-avatar">${initials}</div>
+                        <div class="ticket-content">
+                            <div class="ticket-header">
+                                <span class="ticket-user">${userLabel}</span>
+                                <span class="ticket-time">${time}</span>
+                                ${unreadBadge}
+                            </div>
+                            <div class="ticket-subject">${t.subject}</div>
+                            <div class="ticket-preview">${preview}</div>
+                            <div class="ticket-meta">
+                                <span class="priority-badge ${t.priority}">${t.priority}</span>
+                                <span class="status-badge ${t.status.replace(' ', '.')}">${t.status}</span>
+                                <span class="message-count">💬 ${t.messages.length}</span>
+                                <span class="ticket-ip">IP: ${t.ip_address || 'N/A'}</span>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function formatTime(timestamp) {
+            const date = new Date(timestamp);
+            const now = new Date();
+            const diff = now - date;
+            const minutes = Math.floor(diff / 60000);
+            const hours = Math.floor(minutes / 60);
+            const days = Math.floor(hours / 24);
+            
+            if (minutes < 1) return 'just now';
+            if (minutes < 60) return `${minutes}m`;
+            if (hours < 24) return `${hours}h`;
+            if (days < 7) return `${days}d`;
+            return date.toLocaleDateString();
+        }
+
+        function openChat(ticketId, clickedElement) {
+            currentTicket = ticketId;
+            
+            // Immediately mark ticket as read (before fetching messages)
+            markTicketAsReadOnBackend(ticketId);
+            
+            fetch('/api/ticket/' + ticketId)
+                .then(r => r.json())
+                .then(ticket => {
+                    displayChatWindow(ticket);
+                    socket.emit('join_room', {room: ticketId});
+                    
+                    // Mark all messages as read using the latest message timestamp
+                    markAllMessagesAsRead(ticket);
+                    
+                    // Update active state in list
+                    document.querySelectorAll('.ticket-item').forEach(item => {
+                        item.classList.remove('active');
+                    });
+                    
+                    // Find and activate the clicked ticket item
+                    if (clickedElement) {
+                        const ticketItem = clickedElement.closest('.ticket-item');
+                        if (ticketItem) {
+                            ticketItem.classList.add('active');
+                        }
+                    } else {
+                        // Fallback: find by ticket ID using data attribute or onclick
+                        const ticketItems = document.querySelectorAll('.ticket-item');
+                        ticketItems.forEach(item => {
+                            const onclickAttr = item.getAttribute('onclick');
+                            if (onclickAttr && onclickAttr.includes(ticketId)) {
+                                item.classList.add('active');
+                            }
+                        });
+                    }
+                })
+                .catch(err => {
+                    console.error('Error loading ticket:', err);
+                });
+        }
+
+        function displayChatWindow(ticket) {
+        const initials = ticket.user_name.substring(0, 2).toUpperCase();
+        const userId = ticket.user_id || 'No ID';
+        const phoneLabel = ticket.user_phone ? `Phone: ${ticket.user_phone}` : 'Phone: N/A';
+        const ipLabel = ticket.ip_address ? `IP: ${ticket.ip_address}` : 'IP: N/A';
+            
+            // Create chat window with proper flex structure
+            const chatArea = document.getElementById('chatArea');
+            chatArea.innerHTML = `
+                <div class="chat-header">
+                    <div class="chat-user-info">
+                        <div class="chat-avatar">${initials}</div>
+                        <div class="chat-user-details">
+                            <h3>${ticket.user_name}</h3>
+                            <p>${ticket.ticket_id} | ${phoneLabel} | ${ipLabel} | ${ticket.subject}</p>
+                        </div>
+                    </div>
+                    <div class="chat-actions">
+                        <button class="btn btn-small" style="background: #667eea;" onclick="openUserHistory('${ticket.user_name}')">📜 History</button>
+                        <button class="btn btn-small" onclick="updateStatus('In Progress')">Mark In Progress</button>
+                        <button class="btn btn-small btn-success" onclick="updateStatus('Resolved')">Resolve</button>
+                        <button class="voice-btn" id="supportHangupBtn" style="display:none; background:#dc2626;">Hang Up</button>
+                    </div>
+                </div>
+                <div class="chat-messages" id="chatMessages" style="flex: 1; overflow-y: auto; padding: 20px; padding-bottom: 30px;"></div>
+                <div class="chat-input">
+                <input type="text" id="messageInput" placeholder="Type your message..." onkeypress="if(event.key==='Enter') sendMessage()">
+                <button class="voice-btn" id="supportVoiceBtn" type="button" title="Record voice note up to 60 seconds">🎤 Voice Note</button>
+                <button class="btn" onclick="sendMessage()">Send</button>
+                </div>
+            `;
+            bindSupportVoiceButton();
+            bindSupportHangupButton();
+            
+            // Display messages
+            ticket.messages.forEach(msg => displayMessage(msg));
+            
+            // Scroll to bottom
+            const messagesDiv = document.getElementById('chatMessages');
+            if (messagesDiv) {
+                messagesDiv.scrollTop = messagesDiv.scrollHeight;
+            }
+        }
+
+        function sendMessage() {
+            const input = document.getElementById('messageInput');
+            const message = input.value.trim();
+
+            if (!message || !currentTicket) return;
+
+            console.log('Sending message:', {
+                ticket_id: currentTicket,
+                sender: username,
+                message: message
+            });
+
+            socket.emit('send_message', {
+                ticket_id: currentTicket,
+                sender: username,
+                message: message,
+                sender_type: 'support'
+            });
+
+            // Mark as read when sending a reply (we've obviously seen the messages)
+            setLastSeenTimestamp(currentTicket);
+
+            input.value = '';
+        }
+
+        let supportVoiceBtn = null;
+        const MAX_VOICE_DURATION_MS_SUPPORT = 60 * 1000;
+        let supportVoiceRecorder = null;
+        let supportVoiceStream = null;
+        let supportVoiceChunks = [];
+        let supportVoiceStart = 0;
+        let supportVoiceTimeout = null;
+        let supportVoiceInterval = null;
+        const supportVoiceLabel = '🎤 Voice Note';
+
+        function bindSupportVoiceButton() {
+            supportVoiceBtn = document.getElementById('supportVoiceBtn');
+            if (!supportVoiceBtn) return;
+            supportVoiceBtn.addEventListener('click', () => {
+                if (supportVoiceRecorder && supportVoiceRecorder.state === 'recording') {
+                    stopSupportVoiceRecording();
+                } else {
+                    startSupportVoiceRecording();
+                }
+            });
+        }
+
+        async function startSupportVoiceRecording() {
+            if (!currentTicket) {
+                alert('Select a ticket to record a voice note.');
+                return;
+            }
+            if (!navigator.mediaDevices?.getUserMedia) {
+                alert('Audio recording is not supported in your browser.');
+                return;
+            }
+            if (typeof MediaRecorder === 'undefined') {
+                alert('Voice recording is not supported in your browser.');
+                return;
+            }
+
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                supportVoiceStream = stream;
+                supportVoiceChunks = [];
+                supportVoiceStart = Date.now();
+                supportVoiceRecorder = new MediaRecorder(stream);
+
+                supportVoiceRecorder.ondataavailable = e => {
+                    if (e.data && e.data.size) {
+                        supportVoiceChunks.push(e.data);
+                    }
+                };
+
+                supportVoiceRecorder.onstop = handleSupportVoiceStop;
+                supportVoiceRecorder.start();
+
+                updateSupportVoiceButton(`Recording... 0s`);
+                supportVoiceBtn?.classList.add('recording');
+                supportVoiceTimeout = setTimeout(() => stopSupportVoiceRecording(), MAX_VOICE_DURATION_MS_SUPPORT);
+                supportVoiceInterval = setInterval(() => {
+                    const elapsed = Math.min(60, Math.floor((Date.now() - supportVoiceStart) / 1000));
+                    updateSupportVoiceButton(`Recording... ${elapsed}s`);
+                }, 1000);
+            } catch (err) {
+                console.error('Support voice recording failed', err);
+                alert('Please allow microphone access to record a voice note.');
+            }
+        }
+
+        function stopSupportVoiceRecording() {
+            if (!supportVoiceRecorder) {
+                return;
+            }
+
+            clearTimeout(supportVoiceTimeout);
+            supportVoiceTimeout = null;
+            clearInterval(supportVoiceInterval);
+            supportVoiceInterval = null;
+
+            if (supportVoiceRecorder.state === 'recording') {
+                supportVoiceRecorder.stop();
+            }
+        }
+
+        function updateSupportVoiceButton(label) {
+            if (supportVoiceBtn) {
+                supportVoiceBtn.textContent = label;
+            }
+        }
+
+        async function handleSupportVoiceStop() {
+            supportVoiceBtn?.classList.remove('recording');
+            if (supportVoiceStream) {
+                supportVoiceStream.getTracks().forEach(track => track.stop());
+                supportVoiceStream = null;
+            }
+
+            if (!supportVoiceChunks.length) {
+                updateSupportVoiceButton(supportVoiceLabel);
+                return;
+            }
+
+            const durationMs = Math.min(MAX_VOICE_DURATION_MS_SUPPORT, Date.now() - supportVoiceStart);
+            const durationSec = durationMs / 1000;
+            const blob = new Blob(supportVoiceChunks, { type: supportVoiceChunks[0]?.type || 'audio/webm' });
+
+            updateSupportVoiceButton('Uploading...');
+            supportVoiceBtn.disabled = true;
+
+            try {
+                const uploadUrl = await uploadVoiceBlob(blob, durationSec);
+                socket.emit('send_message', {
+                    ticket_id: currentTicket,
+                    sender: username,
+                    message: uploadUrl,
+                    sender_type: 'support',
+                    voice_duration: durationSec.toFixed(1)
+                });
+            } catch (err) {
+                console.error(err);
+                alert('Voice upload failed. Please try again.');
+            } finally {
+                supportVoiceBtn.disabled = false;
+                updateSupportVoiceButton(supportVoiceLabel);
+            }
+            supportVoiceRecorder = null;
+        }
+
+        const incomingCallBanner = document.getElementById('incomingCallBanner');
+        const incomingCallText = document.getElementById('incomingCallText');
+        const acceptCallBtn = document.getElementById('acceptCallBtn');
+        const rejectCallBtn = document.getElementById('rejectCallBtn');
+        let supportHangupBtn = null;
+        let incomingCallSessionId = null;
+        let supportCallPeer = null;
+        let supportCallStream = null;
+        let supportRemoteAudio = null;
+        const callPcConfig = {
+            iceServers: [
+                { urls: ["stun:stun.l.google.com:19302"] }
+            ]
+        };
+
+        function showIncomingCall(data) {
+            if (!incomingCallBanner || !incomingCallText) return;
+            incomingCallText.textContent = `Incoming call from ${data.user_name || 'User'} (${data.ticket_id || 'unknown ticket'})`;
+            incomingCallBanner.style.display = 'flex';
+            incomingCallSessionId = data.session_id;
+        }
+
+        function hideIncomingCall() {
+            if (!incomingCallBanner) return;
+            incomingCallBanner.style.display = 'none';
+            incomingCallSessionId = null;
+        }
+
+        function cleanupSupportCall() {
+            if (supportCallStream) {
+                supportCallStream.getTracks().forEach(track => track.stop());
+                supportCallStream = null;
+            }
+            if (supportCallPeer) {
+                supportCallPeer.close();
+                supportCallPeer = null;
+            }
+            if (supportRemoteAudio) {
+                supportRemoteAudio.pause();
+                supportRemoteAudio.srcObject = null;
+                supportRemoteAudio = null;
+            }
+            hideIncomingCall();
+            if (supportHangupBtn) {
+                supportHangupBtn.style.display = 'none';
+            }
+        }
+
+        function endSupportCall() {
+            if (incomingCallSessionId) {
+                socket.emit('call_end', { session_id: incomingCallSessionId });
+            }
+            cleanupSupportCall();
+        }
+
+        function bindSupportHangupButton() {
+            supportHangupBtn = document.getElementById('supportHangupBtn');
+            if (!supportHangupBtn) return;
+            supportHangupBtn.addEventListener('click', endSupportCall);
+        }
+
+        if (acceptCallBtn) {
+            acceptCallBtn.addEventListener('click', () => {
+                if (!incomingCallSessionId) return;
+                socket.emit('call_accept', { session_id: incomingCallSessionId });
+                if (supportHangupBtn) {
+                    supportHangupBtn.style.display = 'block';
+                }
+                hideIncomingCall();
+            });
+        }
+
+        if (rejectCallBtn) {
+            rejectCallBtn.addEventListener('click', () => {
+                if (!incomingCallSessionId) return;
+                socket.emit('call_reject', { session_id: incomingCallSessionId });
+                cleanupSupportCall();
+            });
+        }
+
+        socket.on('incoming_call', data => {
+            showIncomingCall(data);
+        });
+
+        socket.on('call_ended', () => {
+            cleanupSupportCall();
+        });
+
+        socket.on('webrtc_offer', async data => {
+            if (!incomingCallSessionId || data.session_id !== incomingCallSessionId) return;
+            try {
+                supportCallStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                supportRemoteAudio = supportRemoteAudio || new Audio();
+                supportRemoteAudio.autoplay = true;
+
+                supportCallPeer = new RTCPeerConnection(callPcConfig);
+                supportCallPeer.onicecandidate = event => {
+                    if (event.candidate) {
+                        socket.emit('webrtc_ice', {
+                            target_sid: data.from,
+                            candidate: event.candidate
+                        });
+                    }
+                };
+                supportCallPeer.ontrack = event => {
+                    if (supportRemoteAudio) {
+                        supportRemoteAudio.srcObject = event.streams[0];
+                    }
+                };
+
+                supportCallStream.getTracks().forEach(track => {
+                    supportCallPeer.addTrack(track, supportCallStream);
+                });
+
+                await supportCallPeer.setRemoteDescription({ type: 'offer', sdp: data.sdp });
+                const answer = await supportCallPeer.createAnswer();
+                await supportCallPeer.setLocalDescription(answer);
+                socket.emit('webrtc_answer', {
+                    target_sid: data.from,
+                    sdp: answer.sdp,
+                    session_id: data.session_id
+                });
+                if (supportHangupBtn) {
+                    supportHangupBtn.style.display = 'block';
+                }
+            } catch (err) {
+                console.error('Failed to handle offer', err);
+            }
+        });
+
+        socket.on('webrtc_ice', async data => {
+            if (!supportCallPeer || !data.candidate) return;
+            try {
+                await supportCallPeer.addIceCandidate(data.candidate);
+            } catch (err) {
+                console.error('Failed to add ICE candidate', err);
+            }
+        });
+
+        async function uploadVoiceBlob(blob, duration) {
+            const formData = new FormData();
+            formData.append('files', blob, `voice-${Date.now()}.webm`);
+            formData.append('voice_duration', duration.toFixed(1));
+
+            const response = await fetch('/upload_image', {
+                method: 'POST',
+                body: formData
+            });
+            const data = await response.json();
+            if (!response.ok || data.error) {
+                throw new Error(data.error || 'Upload failed');
+            }
+            return data.urls;
+        }
+
+        function updateStatus(newStatus) {
+            if (!currentTicket) return;
+
+            socket.emit('update_ticket_status', {
+                ticket_id: currentTicket,
+                status: newStatus
+            });
+        }
+
+        function displayMessage(msg) {
+            const messagesDiv = document.getElementById('chatMessages');
+            if (!messagesDiv) return;
+            
+            const messageEl = document.createElement('div');
+            messageEl.className = 'message ' + msg.sender_type;
+            
+            // Check if message is a URL (file/image)
+            const messageText = msg.message;
+            let messageContent = messageText;
+            
+            // If message is a URL (proxy URL /file/... or direct URL)
+            if (messageText.startsWith('/file/') || messageText.startsWith('http://') || messageText.startsWith('https://')) {
+                const url = messageText;
+                // Get extension from URL (for proxy URLs, check the original file type)
+                let extension = '';
+                if (url.startsWith('/file/')) {
+                    // For proxy URLs, we'll detect type from the response or use a generic approach
+                    // Try to get extension from the URL if it was preserved, otherwise detect from content
+                    extension = 'jpg'; // Default, will be handled by browser
+                } else {
+                    extension = url.split('.').pop().toLowerCase().split('?')[0];
+                }
+                
+                const isVoiceNote = msg.attachment_type === 'voice' || msg.voice_duration;
+                const durationLabel = msg.voice_duration ? `<span class="voice-duration">🎤 ${Number(msg.voice_duration).toFixed(1)}s</span>` : '';
+
+                if (isVoiceNote) {
+                    messageContent = `
+                        <div class="audio-bubble">
+                            <audio src="${url}" controls></audio>
+                            ${durationLabel}
+                        </div>
+                    `;
+                } else if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(extension) || url.startsWith('/file/')) {
+                    // Display as image (proxy URLs default to images)
+                    messageContent = `<img src="${url}" alt="Uploaded image" style="max-width: 100%; border-radius: 8px; margin-top: 5px;">`;
+                } else if (['mp4', 'webm', 'ogg'].includes(extension)) {
+                    // Display as video
+                    messageContent = `<video src="${url}" controls style="max-width: 100%; border-radius: 8px; margin-top: 5px;"></video>`;
+                } else if (['mp3', 'wav', 'ogg'].includes(extension)) {
+                    // Display as audio
+                    messageContent = `<audio src="${url}" controls style="max-width: 100%; margin-top: 5px;"></audio>`;
+                } else {
+                    // Display as clickable link
+                    const displayUrl = url.startsWith('/file/') ? '📎 File' : url;
+                    messageContent = `<a href="${url}" target="_blank" style="color: #667eea; text-decoration: underline;">${displayUrl}</a>`;
+                }
+            }
+            
+            messageEl.innerHTML = `
+                <div class="message-bubble">
+                    <strong>${msg.sender}:</strong> ${messageContent}
+                    <div class="message-time">${new Date(msg.timestamp).toLocaleTimeString()}</div>
+                </div>
+            `;
+            messagesDiv.appendChild(messageEl);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+        
+        // User History Functions
+        let currentHistoryUser = null;
+        
+        function openUserHistory(userName) {
+            currentHistoryUser = userName;
+            const panel = document.getElementById('historyPanel');
+            const content = document.getElementById('historyContent');
+            
+            // Show loading
+            content.innerHTML = '<div class="history-empty">Loading history...</div>';
+            panel.classList.add('open');
+            
+            // Load user's ticket history
+            fetch(`/api/user/tickets?username=${encodeURIComponent(userName)}`)
+                .then(r => r.json())
+                .then(tickets => {
+                    displayUserHistory(tickets, userName);
+                })
+                .catch(err => {
+                    content.innerHTML = '<div class="history-empty">Error loading history</div>';
+                    console.error('Error loading user history:', err);
+                });
+        }
+        
+        function closeHistory() {
+            document.getElementById('historyPanel').classList.remove('open');
+            currentHistoryUser = null;
+        }
+        
+        function displayUserHistory(tickets, userName) {
+            const content = document.getElementById('historyContent');
+            
+            if (!tickets || tickets.length === 0) {
+                content.innerHTML = `
+                    <div class="history-empty">
+                        <div style="font-size: 48px; margin-bottom: 10px;">📭</div>
+                        <div>No tickets found for <strong>${userName}</strong></div>
+                    </div>
+                `;
+                return;
+            }
+            
+            // Sort by date (newest first)
+            tickets.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+            
+            let html = `<div style="padding: 10px; background: #f8f9fa; margin-bottom: 10px; border-radius: 8px; text-align: center;">
+                <strong>Total: ${tickets.length} ticket(s)</strong>
+            </div>`;
+            
+            tickets.forEach(ticket => {
+                const isCurrent = currentTicket === ticket.ticket_id;
+                const statusClass = ticket.status.replace(' ', '.');
+                const date = new Date(ticket.created_at).toLocaleDateString();
+                const messagesCount = ticket.messages ? ticket.messages.length : 0;
+                
+                html += `
+                    <div class="history-ticket ${isCurrent ? 'current' : ''}" onclick="openChat('${ticket.ticket_id}', this)">
+                        <div class="history-ticket-header">
+                            <span class="history-ticket-id">${ticket.ticket_id}</span>
+                            <span class="history-ticket-status status-badge ${statusClass}">${ticket.status}</span>
+                        </div>
+                        <div class="history-ticket-subject"><strong>${ticket.subject}</strong></div>
+                        <div class="history-ticket-meta">
+                            <span>📅 ${date}</span>
+                            <span>💬 ${messagesCount} msg</span>
+                        </div>
+                    </div>
+                `;
+            });
+            
+            content.innerHTML = html;
+        }
+    </script>
+
+    <!-- User History Panel -->
+    <div class="history-panel" id="historyPanel">
+        <div class="history-header">
+            <h3>📜 User Ticket History</h3>
+            <button class="history-close" onclick="closeHistory()">×</button>
+        </div>
+        <div class="history-content" id="historyContent">
+            <div class="history-empty">No history loaded</div>
+        </div>
+    </div>
+</body>
+</html>
