@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Orange Support - Dashboard</title>
+    <title>Web11 Support - Dashboard</title>
     <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -12,7 +12,7 @@
             background: #f5f7fa;
         }
         .header {
-            background: #FFA500;
+            background: #b91c1b;
             color: white;
             padding: 20px;
             display: flex;
@@ -26,10 +26,11 @@
         }
         .logo-badge {
             margin-right: 15px;
-            font-weight: 700;
-            color: #1f2937;
-            font-size: 20px;
-            letter-spacing: 0.05em;
+        }
+        .logo-badge img {
+            height: 35px;
+            width: auto;
+            vertical-align: middle;
         }
         .container { max-width: 1200px; margin: 20px auto; padding: 0 20px; }
         .ticket-form {
@@ -175,103 +176,85 @@
             color: #333;
             border-bottom-left-radius: 5px;
         }
-        .audio-bubble {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            padding: 6px 10px;
-            border-radius: 10px;
-            background: rgba(37, 99, 235, 0.08);
-        }
-        .audio-bubble audio {
-            width: 130px;
-        }
         .message-time {
             font-size: 11px;
             color: #999;
             margin-top: 5px;
         }
-        .voice-duration {
-            font-size: 11px;
-            color: #555;
-            margin-top: 4px;
-        }
         .chat-input {
             display: flex;
             align-items: center;
-            padding: 8px 10px;
-            background: #f5f5f5;
+            padding: 8px 12px;
+            background: #f0f2f5;
             border-top: 1px solid #e4e6eb;
-            gap: 4px;
+            gap: 8px;
         }
 
         .chat-input input[type="file"] {
             display: none;
         }
 
-        .chat-input .icon-btn {
-            width: 34px;
-            height: 34px;
-            border-radius: 50%;
-            border: none;
+        .attach-btn {
             background: transparent;
+            border: none;
+            cursor: pointer;
+            padding: 8px 12px;
+            border-radius: 50%;
             display: flex;
             align-items: center;
             justify-content: center;
-            color: #4b5563;
-            font-size: 18px;
-            cursor: pointer;
-            transition: background 0.2s ease, color 0.2s ease;
+            color: #54656f;
+            font-size: 24px;
+            transition: background 0.2s;
+            min-width: 40px;
+            height: 40px;
         }
 
-        .chat-input .icon-btn:hover {
-            background: rgba(37, 99, 235, 0.12);
-            color: #2563eb;
+        .attach-btn:hover {
+            background: #e4e6eb;
         }
 
-        .voice-btn.recording {
-            background: #dc2626;
-            color: white;
-        }
-
-        .call-status {
-            margin-top: 8px;
-            font-size: 12px;
-            color: #374151;
-            min-height: 16px;
+        .attach-btn:active {
+            background: #d1d7db;
         }
 
         .chat-input input[type="text"] {
             flex: 1;
-            padding: 10px 14px;
+            padding: 10px 16px;
             border: none;
-            border-radius: 999px;
+            border-radius: 24px;
             background: white;
-            font-size: 14px;
+            font-size: 15px;
             outline: none;
             margin: 0;
-            box-shadow: none;
         }
 
         .chat-input input[type="text"]:focus {
-            box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.7);
+            box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.1);
         }
 
         .chat-input .send-btn {
             background: #25d366;
             border: none;
             color: white;
-            padding: 8px 16px;
-            border-radius: 999px;
+            padding: 10px 20px;
+            border-radius: 24px;
             cursor: pointer;
-            font-size: 13px;
-            font-weight: 600;
+            font-size: 15px;
+            font-weight: 500;
             transition: background 0.2s;
-            min-width: 48px;
+            min-width: 60px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
 
         .chat-input .send-btn:hover {
             background: #20ba5a;
+        }
+
+        .chat-input .send-btn:active {
+            background: #1da851;
         }
 
         .chat-input .send-btn:disabled {
@@ -472,7 +455,7 @@
     <div class="header">
         <div style="display: flex; align-items: center;">
             <span class="logo-badge">
-                DEMO
+                <img src="https://web11.co/logo.png" alt="Web11">
             </span>
             <div>
                 <h1 style="font-size: 20px;"> {{ username }}</h1>
@@ -530,8 +513,6 @@
                         <path d="M5 9h4V5H9a4 4 0 0 0-4 4z" fill="currentColor" opacity="0.3"/>
                     </svg>
                 </button>
-                <button class="voice-btn" id="voiceRecordBtn" type="button" title="Record up to 60s voice note">🎤 </button>
-                <!-- <button class="call-btn" onclick="startCall()" id="callSupportBtn" type="button" title="Call support">📞 Call Support new</button> -->
                 <input type="text" id="messageInput" placeholder="Type a message">
                 <button class="send-btn" onclick="sendMessage()" id="sendButton">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -539,14 +520,13 @@
                     </svg>
                 </button>
             </div>
-            <div id="callStatusLabel" class="call-status" aria-live="polite"></div>
         </div>
     </div>
 
     <script>
         const socket = io();
         const username = "{{ username }}";
-        const userPhone = "{{ phone if phone else username }}"; // User phone for read tracking
+        const userEmail = "{{ username }}"; // User email for read tracking
         let currentTicket = null;
 
         // Unread message tracking for user (keep as fallback, but server handles it now)
@@ -776,7 +756,6 @@
             // Use issue type as the subject
             socket.emit('create_ticket', {
                 user_name: username,
-                user_phone: userPhone,
                 subject: issueType,
                 description: description,
                 priority: 'MEDIUM'  // Default priority
@@ -864,7 +843,7 @@
 
         function loadTickets() {
             // Pass user email to get unread counts from Redis
-            fetch(`/api/user/tickets?username=${encodeURIComponent(username)}&user_phone=${encodeURIComponent(userPhone)}`)
+            fetch(`/api/user/tickets?username=${encodeURIComponent(username)}&user_email=${encodeURIComponent(userEmail)}`)
                 .then(r => r.json())
                 .then(tickets => {
                     // Sort tickets: Open tickets first, then by created_at (newest first)
@@ -965,7 +944,7 @@
                 },
                 body: JSON.stringify({
                     ticket_id: ticketId,
-                    user_identifier: userPhone
+                    user_identifier: userEmail
                 })
             })
             .then(r => r.json())
@@ -1099,353 +1078,9 @@
             if (!messageText) {
                 input.value = '';
             }
-
-        const callSupportBtn = document.getElementById('callSupportBtn');
-        const callStatusLabel = document.getElementById('callStatusLabel');
-        let callSessionId = null;
-        let callPeerConnection = null;
-        let callLocalStream = null;
-        let callRemoteAudio = null;
-        let isCallActive = false;
-        let currentCallTarget = null;
-
-        const pcConfig = {
-            iceServers: [
-                { urls: ["stun:stun.l.google.com:19302"] }
-            ]
-        };
-
-        function setCallStatus(text) {
-            if (callStatusLabel) {
-                callStatusLabel.textContent = text || '';
-            }
-        }
-
-        function resetCallButton() {
-            if (callSupportBtn) {
-                callSupportBtn.disabled = false;
-                callSupportBtn.textContent = '📞 Call Support';
-                callSupportBtn.classList.remove('active');
-            }
-            isCallActive = false;
-            callSessionId = null;
-            currentCallTarget = null;
-        }
-
-        let callWaitingTimer = null;
-
-        function showCallAlert(text) {
-            if (text) {
-                alert(text);
-            }
-        }
-
-        async function cleanupCall() {
-            if (callLocalStream) {
-                callLocalStream.getTracks().forEach(track => track.stop());
-                callLocalStream = null;
-            }
-            if (callPeerConnection) {
-                callPeerConnection.close();
-                callPeerConnection = null;
-            }
-            if (callRemoteAudio) {
-                callRemoteAudio.pause();
-                callRemoteAudio.srcObject = null;
-                callRemoteAudio = null;
-            }
-            setCallStatus('');
-            resetCallButton();
-        }
-
-        async function startCall() {
-            if (!currentTicket) {
-                alert('Please open a ticket first.');
-                return;
-            }
-            if (!navigator.mediaDevices?.getUserMedia) {
-                alert('Audio calling requires microphone access.');
-                return;
-            }
-            setCallStatus('Calling support...');
-            console.log('callSupportBtn', callSupportBtn);
-            callSupportBtn.disabled = true;
-            socket.emit('call_request', {
-                ticket_id: currentTicket,
-                user_name: username,
-                user_phone: userPhone
-            });
-            if (callWaitingTimer) {
-                clearTimeout(callWaitingTimer);
-            }
-            callWaitingTimer = setTimeout(() => {
-                setCallStatus('Support did not respond yet.');
-            }, 5000);
-        }
-
-        function endCall() {
-            if (callSessionId) {
-                socket.emit('call_end', { session_id: callSessionId });
-            }
-            cleanupCall();
-        }
-        console.log('callSupportBtn', callSupportBtn);
-        if (callSupportBtn) {
-            console.log('callSupportBtn', callSupportBtn);
-            callSupportBtn.addEventListener('click', () => {
-                if (isCallActive) {
-                    endCall();
-                } else {
-                    startCall();
-                }
-            });
-        }
-
-        socket.on('call_status', data => {
-            if (!data || !data.status) return;
-            if (data.status === 'busy' || data.status === 'unavailable') {
-                setCallStatus(data.message);
-                resetCallButton();
-                if (callWaitingTimer) {
-                    clearTimeout(callWaitingTimer);
-                    callWaitingTimer = null;
-                }
-                showCallAlert(data.message || 'Support is unavailable right now.');
-            } else if (data.status === 'ringing') {
-                setCallStatus('Ringing support...');
-                if (callSupportBtn) {
-                    callSupportBtn.disabled = true;
-                }
-            } else if (data.status === 'rejected') {
-                setCallStatus(data.message || 'Support declined the call');
-                resetCallButton();
-            }
-        });
-
-        socket.on('call_accepted', async data => {
-            callSessionId = data.session_id;
-            currentCallTarget = data.support_sid;
-            setCallStatus('Setting up call...');
-            if (callSupportBtn) {
-                callSupportBtn.textContent = 'End Call';
-                callSupportBtn.classList.add('active');
-                callSupportBtn.disabled = false;
-            }
-            isCallActive = true;
-            await startUserWebRTC(data.support_sid);
-        });
-
-        socket.on('call_ended', () => {
-            setCallStatus('Call has ended');
-            cleanupCall();
-        });
-
-        socket.on('call_status', data => {
-            if (data.status === 'rejected') {
-                setCallStatus(data.message || 'Support declined the call');
-                resetCallButton();
-                if (callWaitingTimer) {
-                    clearTimeout(callWaitingTimer);
-                    callWaitingTimer = null;
-                }
-            }
-        });
-
-        socket.on('webrtc_answer', async data => {
-            if (!callPeerConnection || !data.sdp) return;
-            await callPeerConnection.setRemoteDescription({ type: 'answer', sdp: data.sdp });
-        });
-
-        socket.on('webrtc_ice', async data => {
-            if (!callPeerConnection || !data.candidate) return;
-            try {
-                await callPeerConnection.addIceCandidate(data.candidate);
-            } catch (err) {
-                console.error('Failed to add ICE candidate:', err);
-            }
-        });
-
-        async function startUserWebRTC(targetSid) {
-            try {
-                callLocalStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                callRemoteAudio = new Audio();
-                callRemoteAudio.autoplay = true;
-
-                callPeerConnection = new RTCPeerConnection(pcConfig);
-                callPeerConnection.onicecandidate = event => {
-                    if (event.candidate) {
-                        socket.emit('webrtc_ice', {
-                            target_sid: targetSid,
-                            candidate: event.candidate
-                        });
-                    }
-                };
-                callPeerConnection.ontrack = event => {
-                    if (callRemoteAudio) {
-                        callRemoteAudio.srcObject = event.streams[0];
-                    }
-                };
-
-                callLocalStream.getTracks().forEach(track => {
-                    callPeerConnection.addTrack(track, callLocalStream);
-                });
-
-                const offer = await callPeerConnection.createOffer();
-                await callPeerConnection.setLocalDescription(offer);
-                socket.emit('webrtc_offer', {
-                    target_sid: targetSid,
-                    sdp: offer.sdp,
-                    session_id: callSessionId
-                });
-            } catch (err) {
-                console.error('Unable to start WebRTC', err);
-                setCallStatus('Unable to start call');
-                resetCallButton();
-            }
-        }
         }
 
         // Handle file upload
-        const voiceRecordBtn = document.getElementById('voiceRecordBtn');
-        const MAX_VOICE_DURATION_MS = 60 * 1000;
-        let userVoiceRecorder = null;
-        let userVoiceStream = null;
-        let userVoiceChunks = [];
-        let userVoiceStart = 0;
-        let userVoiceTimeout = null;
-        let userVoiceInterval = null;
-        const voiceLabel = '🎤 ';
-
-        function updateVoiceButton(label) {
-            if (voiceRecordBtn) {
-                voiceRecordBtn.textContent = label;
-            }
-        }
-
-        if (voiceRecordBtn) {
-            voiceRecordBtn.addEventListener('click', () => {
-                if (userVoiceRecorder && userVoiceRecorder.state === 'recording') {
-                    stopUserVoiceRecording();
-                } else {
-                    startUserVoiceRecording();
-                }
-            });
-        }
-
-        async function startUserVoiceRecording() {
-            if (!currentTicket) {
-                alert('Please open a ticket before recording a voice note.');
-                return;
-            }
-            if (!navigator.mediaDevices?.getUserMedia) {
-                alert('Audio recording is not supported in your browser.');
-                return;
-            }
-            if (typeof MediaRecorder === 'undefined') {
-                alert('Voice recording is not supported in your browser.');
-                return;
-            }
-
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                userVoiceStream = stream;
-                userVoiceChunks = [];
-                userVoiceStart = Date.now();
-                userVoiceRecorder = new MediaRecorder(stream);
-
-                userVoiceRecorder.ondataavailable = e => {
-                    if (e.data && e.data.size) {
-                        userVoiceChunks.push(e.data);
-                    }
-                };
-
-                userVoiceRecorder.onstop = handleUserVoiceStop;
-                userVoiceRecorder.start();
-
-                updateVoiceButton('Recording... 0s');
-                voiceRecordBtn?.classList.add('recording');
-
-                userVoiceInterval = setInterval(() => {
-                    const elapsed = Math.min(60, Math.floor((Date.now() - userVoiceStart) / 1000));
-                    updateVoiceButton(`Recording... ${elapsed}s`);
-                }, 1000);
-
-                userVoiceTimeout = setTimeout(() => stopUserVoiceRecording(), MAX_VOICE_DURATION_MS);
-            } catch (err) {
-                console.error('Voice recording failed', err);
-                alert('We could not access your microphone. Please allow microphone access and try again.');
-            }
-        }
-
-        function stopUserVoiceRecording() {
-            if (!userVoiceRecorder) {
-                return;
-            }
-
-            clearTimeout(userVoiceTimeout);
-            userVoiceTimeout = null;
-            clearInterval(userVoiceInterval);
-            userVoiceInterval = null;
-
-            if (userVoiceRecorder.state === 'recording') {
-                userVoiceRecorder.stop();
-            }
-        }
-
-        async function handleUserVoiceStop() {
-            voiceRecordBtn?.classList.remove('recording');
-            if (userVoiceStream) {
-                userVoiceStream.getTracks().forEach(track => track.stop());
-                userVoiceStream = null;
-            }
-
-            if (!userVoiceChunks.length) {
-                updateVoiceButton(voiceLabel);
-                return;
-            }
-
-            const durationMs = Math.min(MAX_VOICE_DURATION_MS, Date.now() - userVoiceStart);
-            const durationSec = durationMs / 1000;
-            const blob = new Blob(userVoiceChunks, { type: userVoiceChunks[0]?.type || 'audio/webm' });
-
-            updateVoiceButton('Uploading...');
-            voiceRecordBtn.disabled = true;
-
-            try {
-                const uploadUrl = await uploadVoiceBlob(blob, durationSec);
-                socket.emit('send_message', {
-                    ticket_id: currentTicket,
-                    sender: username,
-                    message: uploadUrl,
-                    sender_type: 'user',
-                    voice_duration: durationSec.toFixed(1)
-                });
-            } catch (err) {
-                console.error(err);
-                alert('Voice note upload failed. Please try again.');
-            } finally {
-                voiceRecordBtn.disabled = false;
-                updateVoiceButton(voiceLabel);
-            }
-            userVoiceRecorder = null;
-        }
-
-        async function uploadVoiceBlob(blob, duration) {
-            const formData = new FormData();
-            formData.append('files', blob, `voice-${Date.now()}.webm`);
-            formData.append('voice_duration', duration.toFixed(1));
-
-            const response = await fetch('/upload_image', {
-                method: 'POST',
-                body: formData
-            });
-            const data = await response.json();
-            if (!response.ok || data.error) {
-                throw new Error(data.error || 'Upload failed');
-            }
-            return data.urls;
-        }
-
         document.getElementById('fileInput').addEventListener('change', function(e) {
             const file = e.target.files[0];
             if (!file) return;
@@ -1523,19 +1158,9 @@
                     extension = url.split('.').pop().toLowerCase().split('?')[0];
                 }
                 
-                const isVoiceNote = msg.attachment_type === 'voice' || msg.voice_duration;
-                const durationLabel = msg.voice_duration ? `<span class="voice-duration">🎤 ${Number(msg.voice_duration).toFixed(1)}s</span>` : '';
-
-                if (isVoiceNote) {
-                    messageContent = `
-                        <div class="audio-bubble">
-                            <audio src="${url}" controls></audio>
-                            ${durationLabel}
-                        </div>
-                    `;
-                } else if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(extension) || url.startsWith('/file/')) {
+                if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(extension) || url.startsWith('/file/')) {
                     // Display as image (proxy URLs default to images)
-                    messageContent = `<img src="${url}" alt="Uploaded image" style="max-width: 100%; border-radius: 8px; margin-top: 5px;">`;
+                    messageContent = `<img src="${url}" alt="Uploaded image" style="max-width: 100%; border-radius: 8px; margin-top: 5px;" onclick="window.open('${url}', '_blank')">`;
                 } else if (['mp4', 'webm', 'ogg'].includes(extension)) {
                     // Display as video
                     messageContent = `<video src="${url}" controls style="max-width: 100%; border-radius: 8px; margin-top: 5px;"></video>`;

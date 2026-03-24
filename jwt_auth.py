@@ -22,14 +22,13 @@ class JWTAuth:
     """JWT Authentication Handler"""
     
     @staticmethod
-    def generate_access_token(user_id, email, name, role, phone=""):
+    def generate_access_token(user_id, email, name, role):
         """Generate JWT access token"""
         payload = {
             'user_id': user_id,
             'email': email,
             'name': name,
             'role': role,
-            'phone': phone,
             'type': 'access',
             'exp': datetime.utcnow() + JWT_ACCESS_TOKEN_EXPIRES,
             'iat': datetime.utcnow()
@@ -84,8 +83,7 @@ class JWTAuth:
             user_data['user_id'],
             user_data['email'],
             user_data['name'],
-            user_data['role'],
-            user_data.get('phone', '')
+            user_data['role']
         )
         
         return new_access_token, None

@@ -46,8 +46,7 @@ def login_required(f):
             'user_id': session.get('user_id'),
             'name': session.get('username'),
             'email': session.get('email'),
-            'role': session.get('role'),
-            'phone': session.get('phone')
+            'role': session.get('role')
         }
         return f(*args, **kwargs)
     return decorated_function
@@ -71,8 +70,7 @@ def admin_required(f):
             'user_id': session.get('user_id'),
             'name': session.get('username'),
             'email': session.get('email'),
-            'role': session.get('role'),
-            'phone': session.get('phone')
+            'role': session.get('role')
         }
         return f(*args, **kwargs)
     return decorated_function
@@ -109,13 +107,11 @@ class Priority(Enum):
 class Ticket:
     ticket_counter = 1000
 
-    def __init__(self, user_name, subject, description, priority="MEDIUM",
-                 user_id=None, user_phone="", ip_address=""):
+    def __init__(self, user_name, subject, description, priority="MEDIUM", user_id=None):
         Ticket.ticket_counter += 1
         self.ticket_id = f"TKT-{Ticket.ticket_counter}"
         self.user_name = user_name
         self.user_id = user_id  # MongoDB ObjectId or user ID
-        self.user_phone = user_phone or ""
         self.subject = subject
         self.description = description
         self.priority = priority
@@ -125,17 +121,14 @@ class Ticket:
         self.messages = []
         self.assigned_to = None
         self.room_id = self.ticket_id
-        self.ip_address = ip_address or ""
 
-    def add_message(self, sender, message, sender_type="user", metadata=None):
+    def add_message(self, sender, message, sender_type="user"):
         msg = {
             'sender': sender,
             'message': message,
             'sender_type': sender_type,
             'timestamp': datetime.datetime.now().isoformat()
         }
-        if metadata:
-            msg.update(metadata)
         self.messages.append(msg)
         self.updated_at = datetime.datetime.now().isoformat()
         return msg
@@ -149,7 +142,6 @@ class Ticket:
             'ticket_id': self.ticket_id,
             'user_name': self.user_name,
             'user_id': self.user_id,
-            'user_phone': self.user_phone,
             'subject': self.subject,
             'description': self.description,
             'priority': self.priority,
@@ -158,8 +150,7 @@ class Ticket:
             'updated_at': self.updated_at,
             'messages': self.messages,
             'assigned_to': self.assigned_to,
-            'room_id': self.room_id,
-            'ip_address': self.ip_address
+            'room_id': self.room_id
         }
 
     @staticmethod
@@ -169,7 +160,6 @@ class Ticket:
         ticket.ticket_id = data['ticket_id']
         ticket.user_name = data['user_name']
         ticket.user_id = data.get('user_id')
-        ticket.user_phone = data.get('user_phone', '')
         ticket.subject = data['subject']
         ticket.description = data['description']
         ticket.priority = data['priority']
@@ -179,7 +169,6 @@ class Ticket:
         ticket.messages = data.get('messages', [])
         ticket.assigned_to = data.get('assigned_to')
         ticket.room_id = data.get('room_id', ticket.ticket_id)
-        ticket.ip_address = data.get('ip_address', '')
         return ticket
 
 
@@ -351,134 +340,123 @@ class RedisTicketManager:
     def __init__(self, redis_client):
         self.redis = redis_client
         self.ticket_prefix = "support_system:ticket:"
+        self.ticket_list_key = "support_system:tickets:all"
         self.ticket_counter_key = "support_system:ticket_counter"
         self.user_tickets_prefix = "support_system:user_tickets:"
-        self.ticket_index_key = "support_system:tickets:index"
-        self.active_tickets_index_key = "support_system:tickets:active:index"
-        self.resolved_tickets_index_key = "support_system:tickets:resolved:index"
+        
+        # Ticket status indexes for filtering
+        self.active_tickets_key = "support_system:tickets:active"  # Open + In Progress
+        self.resolved_tickets_key = "support_system:tickets:resolved"  # Resolved + Closed
+        
+        # TTL for resolved tickets (optional - 0 means keep forever)
         self.resolved_ticket_ttl = int(os.getenv('RESOLVED_TICKET_TTL', 2592000))  # 30 days default
-
+        
+        # Initialize counter from Redis or start at 1000
         if not self.redis.exists(self.ticket_counter_key):
             self.redis.set(self.ticket_counter_key, 1000)
-
-    def create_ticket(self, user_name, subject, description, priority="MEDIUM",
-                      user_id=None, user_phone="", ip_address=""):
-        """Create a new ticket and store metadata in Redis"""
+    
+    def create_ticket(self, user_name, subject, description, priority="MEDIUM", user_id=None):
+        """Create a new ticket and store in Redis"""
+        # Increment counter
         counter = self.redis.incr(self.ticket_counter_key)
         ticket_id = f"TKT-{counter}"
-        now_iso = datetime.datetime.now().isoformat()
-
+        
+        # Create ticket dict
         ticket_data = {
             'ticket_id': ticket_id,
             'user_name': user_name,
             'user_id': user_id or '',
-            'user_phone': user_phone or '',
             'subject': subject,
             'description': description,
             'priority': priority,
             'status': TicketStatus.OPEN.value,
-            'created_at': now_iso,
-            'updated_at': now_iso,
-            'messages': '[]',
+            'created_at': datetime.datetime.now().isoformat(),
+            'updated_at': datetime.datetime.now().isoformat(),
+            'messages': '[]',  # Store as JSON string
             'assigned_to': '',
-            'room_id': ticket_id,
-            'ip_address': ip_address or ''
+            'room_id': ticket_id
         }
-
+        
+        # Store in Redis
         self.redis.hset(f"{self.ticket_prefix}{ticket_id}", mapping=ticket_data)
-
-        created_score = self._score_from_timestamp(now_iso)
-        self.redis.zadd(self.ticket_index_key, {ticket_id: created_score})
-        self.redis.zadd(self.active_tickets_index_key, {ticket_id: created_score})
-        self.redis.zrem(self.resolved_tickets_index_key, ticket_id)
-
+        
+        # Add to global ticket list
+        self.redis.sadd(self.ticket_list_key, ticket_id)
+        
+        # Add to active tickets index (for fast filtering)
+        self.redis.sadd(self.active_tickets_key, ticket_id)
+        
+        # Add to user's ticket list
         self.redis.sadd(f"{self.user_tickets_prefix}{user_name}", ticket_id)
+        
+        # If user_id provided, also index by user_id
         if user_id:
             self.redis.sadd(f"{self.user_tickets_prefix}uid:{user_id}", ticket_id)
-
+        
+        # Create Ticket object
         ticket_data['messages'] = []
         return Ticket.from_dict(ticket_data)
-
+    
     def get_ticket(self, ticket_id):
         """Get a ticket from Redis"""
         ticket_data = self.redis.hgetall(f"{self.ticket_prefix}{ticket_id}")
         if not ticket_data:
             return None
-
+        
+        # Decode and parse
         ticket_dict = {}
         for key, value in ticket_data.items():
             key_str = key.decode() if isinstance(key, bytes) else key
             value_str = value.decode() if isinstance(value, bytes) else value
             ticket_dict[key_str] = value_str
-
+        
+        # Parse messages JSON
         import json
         ticket_dict['messages'] = json.loads(ticket_dict.get('messages', '[]'))
-
+        
         return Ticket.from_dict(ticket_dict)
-
+    
     def update_ticket(self, ticket):
-        """Update a ticket in Redis and refresh sorted indexes"""
+        """Update a ticket in Redis and manage status indexes"""
         import json
         ticket_dict = ticket.to_dict()
+        
+        # Convert messages to JSON string
         redis_data = ticket_dict.copy()
         redis_data['messages'] = json.dumps(ticket_dict['messages'])
         redis_data['assigned_to'] = redis_data['assigned_to'] or ''
-        redis_data['user_phone'] = ticket.user_phone or ''
-        redis_data['ip_address'] = ticket.ip_address or ''
-
+        
+        # Store in Redis
         self.redis.hset(f"{self.ticket_prefix}{ticket.ticket_id}", mapping=redis_data)
-
-        score = self._score_from_timestamp(ticket.updated_at)
-        self.redis.zadd(self.ticket_index_key, {ticket.ticket_id: score})
-
+        
+        # Update status indexes based on current status
         status = ticket.status
-        if status in [TicketStatus.OPEN.value, TicketStatus.IN_PROGRESS.value]:
-            self.redis.zadd(self.active_tickets_index_key, {ticket.ticket_id: score})
-            self.redis.zrem(self.resolved_tickets_index_key, ticket.ticket_id)
-        elif status in [TicketStatus.RESOLVED.value, TicketStatus.CLOSED.value]:
-            self.redis.zadd(self.resolved_tickets_index_key, {ticket.ticket_id: score})
-            self.redis.zrem(self.active_tickets_index_key, ticket.ticket_id)
-
+        if status in ['Open', 'In Progress']:
+            # Move to active index (remove from resolved if it was there)
+            self.redis.sadd(self.active_tickets_key, ticket.ticket_id)
+            self.redis.srem(self.resolved_tickets_key, ticket.ticket_id)
+        elif status in ['Resolved', 'Closed']:
+            # Move to resolved index (remove from active)
+            self.redis.srem(self.active_tickets_key, ticket.ticket_id)
+            self.redis.sadd(self.resolved_tickets_key, ticket.ticket_id)
+            
+            # Set TTL on resolved tickets (optional - 0 means keep forever)
             if self.resolved_ticket_ttl > 0:
                 self.redis.expire(f"{self.ticket_prefix}{ticket.ticket_id}", self.resolved_ticket_ttl)
-        else:
-            self.redis.zadd(self.active_tickets_index_key, {ticket.ticket_id: score})
-            self.redis.zrem(self.resolved_tickets_index_key, ticket.ticket_id)
-
-    def get_tickets_paginated(self, status_filter='active', page=1, page_size=50, search=None):
-        """Fetch tickets using sorted set indexes with optional filtering"""
-        index_key = self._index_key_for_status(status_filter)
-        multiplier = 3 if search else 2
-        ticket_ids, full_chunk = self._fetch_ticket_ids(index_key, page, page_size, multiplier)
-        tickets = []
-        for ticket_id in ticket_ids:
-            ticket = self.get_ticket(ticket_id)
-            if not ticket:
-                continue
-            if not self._status_matches(ticket, status_filter):
-                continue
-            if search and not self._matches_search(ticket, search):
-                continue
-            tickets.append(ticket)
-            if len(tickets) >= page_size:
-                break
-
-        has_more = full_chunk and len(tickets) >= page_size
-        meta = {
-            'page': page,
-            'status': status_filter,
-            'page_size': page_size,
-            'has_more': has_more,
-            'next_page': page + 1 if has_more else None,
-            'total': self.redis.zcard(index_key)
-        }
-        return tickets, meta
-
+    
     def get_all_tickets(self):
-        tickets, _ = self.get_tickets_paginated('all', page=1, page_size=1000)
+        """Get all tickets from Redis"""
+        ticket_ids = self.redis.smembers(self.ticket_list_key)
+        tickets = []
+        for tid in ticket_ids:
+            tid_str = tid.decode() if isinstance(tid, bytes) else tid
+            ticket = self.get_ticket(tid_str)
+            if ticket:
+                tickets.append(ticket)
         return tickets
-
+    
     def get_user_tickets(self, user_name):
+        """Get all tickets for a specific user"""
         ticket_ids = self.redis.smembers(f"{self.user_tickets_prefix}{user_name}")
         tickets = []
         for tid in ticket_ids:
@@ -487,12 +465,15 @@ class RedisTicketManager:
             if ticket:
                 tickets.append(ticket)
         return tickets
-
-    def get_pending_tickets(self, page=1, page_size=200):
-        tickets, _ = self.get_tickets_paginated('active', page, page_size)
-        return tickets
-
+    
+    def get_pending_tickets(self):
+        """Get all open/in-progress tickets"""
+        all_tickets = self.get_all_tickets()
+        return [t for t in all_tickets 
+                if t.status in [TicketStatus.OPEN.value, TicketStatus.IN_PROGRESS.value]]
+    
     def get_tickets_by_user_id(self, user_id):
+        """Get all tickets for a specific user_id (MongoDB ID)"""
         ticket_ids = self.redis.smembers(f"{self.user_tickets_prefix}uid:{user_id}")
         tickets = []
         for tid in ticket_ids:
@@ -501,82 +482,52 @@ class RedisTicketManager:
             if ticket:
                 tickets.append(ticket)
         return tickets
-
-    def get_active_tickets(self, page=1, page_size=200):
-        tickets, _ = self.get_tickets_paginated('active', page, page_size)
+    
+    def get_active_tickets(self):
+        """Get all active tickets (Open + In Progress) - Fast using index"""
+        ticket_ids = self.redis.smembers(self.active_tickets_key)
+        tickets = []
+        for tid in ticket_ids:
+            tid_str = tid.decode() if isinstance(tid, bytes) else tid
+            ticket = self.get_ticket(tid_str)
+            if ticket:
+                tickets.append(ticket)
         return tickets
-
-    def get_resolved_tickets(self, page=1, page_size=200):
-        tickets, _ = self.get_tickets_paginated('resolved', page, page_size)
+    
+    def get_resolved_tickets(self):
+        """Get all resolved/closed tickets - Fast using index"""
+        ticket_ids = self.redis.smembers(self.resolved_tickets_key)
+        tickets = []
+        for tid in ticket_ids:
+            tid_str = tid.decode() if isinstance(tid, bytes) else tid
+            ticket = self.get_ticket(tid_str)
+            if ticket:
+                tickets.append(ticket)
         return tickets
-
+    
     def get_tickets_by_status(self, status_filter='all'):
-        tickets, _ = self.get_tickets_paginated(status_filter, page=1, page_size=200)
-        return tickets
-
+        """Get tickets filtered by status
+        Args:
+            status_filter: 'all', 'active', 'resolved', 'open', 'in_progress', 'closed'
+        """
+        if status_filter == 'active':
+            return self.get_active_tickets()
+        elif status_filter == 'resolved':
+            return self.get_resolved_tickets()
+        elif status_filter == 'all':
+            return self.get_all_tickets()
+        else:
+            # Specific status filter
+            all_tickets = self.get_all_tickets()
+            return [t for t in all_tickets if t.status.lower().replace(' ', '_') == status_filter.lower()]
+    
     def get_ticket_stats(self):
+        """Get statistics about tickets"""
         return {
-            'total': self.redis.zcard(self.ticket_index_key),
-            'active': self.redis.zcard(self.active_tickets_index_key),
-            'resolved': self.redis.zcard(self.resolved_tickets_index_key)
+            'total': self.redis.scard(self.ticket_list_key),
+            'active': self.redis.scard(self.active_tickets_key),
+            'resolved': self.redis.scard(self.resolved_tickets_key)
         }
-
-    def _score_from_timestamp(self, timestamp):
-        try:
-            return datetime.datetime.fromisoformat(timestamp).timestamp()
-        except Exception:
-            return datetime.datetime.now().timestamp()
-
-    def _index_key_for_status(self, status_filter):
-        normalized = status_filter.lower().replace(' ', '_')
-        if normalized in ['active', 'open', 'in_progress', 'inprogress']:
-            return self.active_tickets_index_key
-        if normalized in ['resolved', 'closed']:
-            return self.resolved_tickets_index_key
-        return self.ticket_index_key
-
-    def _status_matches(self, ticket, status_filter):
-        if status_filter == 'all':
-            return True
-        normalized = status_filter.lower().replace(' ', '_')
-        status_value = ticket.status
-        if normalized in ['active', 'open', 'in_progress', 'inprogress']:
-            return status_value in [TicketStatus.OPEN.value, TicketStatus.IN_PROGRESS.value]
-        if normalized == 'resolved':
-            return status_value in [TicketStatus.RESOLVED.value, TicketStatus.CLOSED.value]
-        if normalized == 'closed':
-            return status_value == TicketStatus.CLOSED.value
-        return status_value.lower().replace(' ', '_') == normalized
-
-    def _matches_search(self, ticket, search_term):
-        if not search_term:
-            return True
-        needle = search_term.strip().lower()
-        fields = [
-            ticket.ticket_id,
-            ticket.user_name,
-            ticket.user_phone or "",
-            ticket.user_id or "",
-            ticket.subject or "",
-            ticket.description or ""
-        ]
-        return any(needle in (field or "").lower() for field in fields)
-
-    def _fetch_ticket_ids(self, index_key, page, page_size, multiplier):
-        if page < 1:
-            page = 1
-        chunk = page_size * multiplier
-        start = (page - 1) * chunk
-        stop = start + chunk - 1
-        raw_ids = self.redis.zrevrange(index_key, start, stop)
-        ticket_ids = []
-        for tid in raw_ids:
-            if isinstance(tid, bytes):
-                ticket_ids.append(tid.decode())
-            else:
-                ticket_ids.append(tid)
-        full_chunk = len(raw_ids) == chunk
-        return ticket_ids, full_chunk
 
 
 # ==================== REDIS READ STATUS MANAGER ====================
@@ -616,8 +567,7 @@ class RedisReadStatusManager:
 # ==================== IN-MEMORY STORAGE ====================
 
 ticket_queue = deque()
-support_person = {"name": "Support Agent", "sid": None, "online": False, "busy": False}
-call_sessions = {}
+support_person = {"name": "Support Agent", "sid": None, "online": False}
 
 # Initialize Redis clients and managers
 # Redis Setup (supports both standalone and cluster)
@@ -665,14 +615,6 @@ def get_all_tickets():
     return [t.to_dict() for t in tickets]
 
 
-def get_client_ip():
-    """Return the client's IP, respecting proxy headers."""
-    forwarded = request.headers.get('X-Forwarded-For') or request.headers.get('X-Real-IP')
-    if forwarded:
-        return forwarded.split(',')[0].strip()
-    return request.remote_addr or '0.0.0.0'
-
-
 def notify_support_person(event, data):
     """Notify support person about events"""
     if support_person["online"] and support_person["sid"]:
@@ -695,7 +637,26 @@ def notify_support_person(event, data):
 
 @app.route('/')
 def index():
-    return render_template('index.html')
+    email = request.args.get('email')
+    if email:
+        # Validate email format
+        import re
+        if not re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', email):
+            return render_template('index.html', error="Please enter a valid email address")
+
+        # Extract name from email (before @)
+        name = email.split('@')[0].replace('.', ' ').replace('_', ' ').title()
+
+        # Store user info in session (no authentication needed)
+        session['user_id'] = f"guest_{email}"  # Guest user ID
+        session['username'] = email  # Use email as username
+        session['email'] = email
+        session['role'] = 'guest'  # Mark as guest user
+
+        # Redirect to user dashboard
+        return redirect(url_for('user_dashboard'))
+    else:
+        return render_template('index.html')
 
 
 @app.route('/admin-login')
@@ -708,22 +669,24 @@ def admin_login():
 @limiter.limit("15 per minute")
 def quick_access():
     """Quick access for users - no login required, just email"""
-    phone = request.form.get('phone')
+    email = request.form.get('email')
     
-    if not phone:
-        return render_template('index.html', error="Phone number is required")
+    if not email:
+        return render_template('index.html', error="Email is required")
     
+    # Validate email format
     import re
-    normalized_phone = phone.strip()
-    if not re.match(r'^\+?\d{7,15}$', normalized_phone):
-        return render_template('index.html', error="Please enter a valid phone number")
-
+    if not re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', email):
+        return render_template('index.html', error="Please enter a valid email address")
+    
+    # Extract name from email (before @)
+    name = email.split('@')[0].replace('.', ' ').replace('_', ' ').title()
+    
     # Store user info in session (no authentication needed)
-    session['user_id'] = f"guest_{normalized_phone}"
-    session['username'] = normalized_phone
-    session['phone'] = normalized_phone
+    session['user_id'] = f"guest_{email}"  # Guest user ID
+    session['username'] = email  # Use email as username
+    session['email'] = email
     session['role'] = 'guest'  # Mark as guest user
-    session.pop('email', None)
     
     # Redirect to user dashboard
     return redirect(url_for('user_dashboard'))
@@ -732,15 +695,14 @@ def quick_access():
 @app.route('/login', methods=['POST'])
 @limiter.limit("10 per minute")
 def login():
-    phone = request.form.get('phone')
     email = request.form.get('email')
     password = request.form.get('password')
     
-    if not password or (not email and not phone):
-        return render_template('index.html', error="Phone (or email) and password are required")
+    if not email or not password:
+        return render_template('index.html', error="Email and password are required")
     
     # Authenticate with MongoDB
-    user_data, success = Auth.authenticate(email=email, password=password, phone=phone)
+    user_data, success = Auth.authenticate(email, password)
     
     if not success:
         return render_template('index.html', error="Invalid credentials")
@@ -748,18 +710,16 @@ def login():
     # Generate JWT tokens
     access_token = JWTAuth.generate_access_token(
         user_data['user_id'],
-        user_data.get('email', ''),
+        user_data['email'],
         user_data['name'],
-        user_data['role'],
-        user_data.get('phone', '')
+        user_data['role']
     )
     refresh_token = JWTAuth.generate_refresh_token(user_data['user_id'])
     
     # Store user info in session (for backward compatibility)
     session['user_id'] = user_data['user_id']
-    session['username'] = user_data.get('name') or user_data.get('phone') or user_data.get('email')
-    session['email'] = user_data.get('email', '')
-    session['phone'] = user_data.get('phone', '')
+    session['username'] = user_data['name']
+    session['email'] = user_data['email']
     session['role'] = user_data['role']
     
     # Determine redirect URL
@@ -838,10 +798,9 @@ def refresh_token_endpoint():
 def user_dashboard():
     # Use request.user which works with both JWT and session
     user = request.user
-    return render_template('user_dashboard.html', 
+    return render_template('user_dashboard.html',
                          username=user['name'],
-                         user_id=user['user_id'],
-                         phone=user.get('phone', ''))
+                         user_id=user['user_id'])
 
 
 @app.route('/support')
@@ -867,14 +826,14 @@ def support_dashboard_classic():
 @limiter.limit("30 per minute")
 def api_user_tickets():
     username = request.args.get('username')
-    user_phone = request.args.get('user_phone', username)  # For unread counts
+    user_email = request.args.get('user_email', username)  # For unread counts
     tickets_data = get_user_tickets(username)
     
     # Add unread counts
     for ticket_data in tickets_data:
         ticket = ticket_manager.get_ticket(ticket_data['ticket_id'])
         if ticket:
-            ticket_data['unread_count'] = read_status_manager.get_unread_count(ticket, user_phone)
+            ticket_data['unread_count'] = read_status_manager.get_unread_count(ticket, user_email)
     
     return jsonify(tickets_data)
 
@@ -884,11 +843,17 @@ def api_user_tickets():
 def api_support_tickets():
     support_email = request.args.get('support_email', 'support')  # For unread counts
     status_filter = request.args.get('status', 'active')  # Filter: 'all', 'active', 'resolved'
-    page = max(int(request.args.get('page', 1)), 1)
-    page_size = min(max(int(request.args.get('page_size', 50)), 10), 200)
-    search = request.args.get('search')
-
-    tickets, meta = ticket_manager.get_tickets_paginated(status_filter, page, page_size, search)
+    
+    # Get tickets based on filter (defaults to active for performance)
+    if status_filter == 'active':
+        tickets = ticket_manager.get_active_tickets()
+    elif status_filter == 'resolved':
+        tickets = ticket_manager.get_resolved_tickets()
+    elif status_filter == 'all':
+        tickets = ticket_manager.get_all_tickets()
+    else:
+        tickets = ticket_manager.get_tickets_by_status(status_filter)
+    
     tickets_data = [t.to_dict() for t in tickets]
     
     # Add unread counts for support
@@ -899,7 +864,7 @@ def api_support_tickets():
             # Get unread count using simple counter with 'support' identifier
             ticket_data['unread_count'] = read_status_manager.get_unread_count(ticket, 'support')
     
-    return jsonify({'tickets': tickets_data, 'meta': meta})
+    return jsonify(tickets_data)
 
 
 @app.route('/api/ticket-stats')
@@ -1006,12 +971,6 @@ def handle_disconnect():
         # if role == 'support' and support_person['sid'] == sid:
         support_person['sid'] = None
         support_person['online'] = False
-        support_person['busy'] = False
-        # Remove any call sessions tied to this sid
-        to_remove = [session_id for session_id, session in call_sessions.items()
-                     if session.get('support_sid') == sid or session.get('user_sid') == sid]
-        for session_id in to_remove:
-            call_sessions.pop(session_id, None)
 
         print(f"Client disconnected: {sid} (User: {username})")
     else:
@@ -1056,8 +1015,6 @@ def handle_create_ticket(data):
     subject = data.get('subject')
     description = data.get('description')
     priority = data.get('priority', 'MEDIUM')
-    user_phone = data.get('user_phone') or session.get('phone') or user_name
-    client_ip = get_client_ip()
 
     # Rate Limiting: Check if user is creating tickets too quickly
     rate_limit_key = f"rate_limit:create_ticket:{user_name}"
@@ -1088,15 +1045,7 @@ def handle_create_ticket(data):
         return
 
     # Create ticket in Redis (persistent storage)
-    ticket = ticket_manager.create_ticket(
-        user_name,
-        subject,
-        description,
-        priority,
-        user_id,
-        user_phone=user_phone,
-        ip_address=client_ip
-    )
+    ticket = ticket_manager.create_ticket(user_name, subject, description, priority, user_id)
     ticket_queue.append(ticket.ticket_id)
 
     # Add the initial description as the first message
@@ -1198,18 +1147,7 @@ def handle_send_message(data):
             ticket_reopened = True
             print(f"🔄 Ticket {ticket_id} auto-reopened by user message (was: {old_status})")
         
-        duration = data.get('voice_duration')
-        metadata = None
-        if duration:
-            try:
-                voice_duration = float(duration)
-            except ValueError:
-                voice_duration = duration
-            metadata = {
-                'voice_duration': voice_duration,
-                'attachment_type': 'voice'
-            }
-        msg = ticket.add_message(sender, message, sender_type, metadata)
+        msg = ticket.add_message(sender, message, sender_type)
 
         # Update ticket in Redis
         ticket_manager.update_ticket(ticket)
@@ -1283,103 +1221,6 @@ def handle_send_message(data):
         emit('error', {'message': 'Ticket not found'})
 
 
-@socketio.on('call_request')
-def handle_call_request(data):
-    if not support_person['online'] or not support_person['sid']:
-        emit('call_status', {'status': 'unavailable', 'message': 'Support is offline'})
-        return
-    if support_person['busy']:
-        emit('call_status', {'status': 'busy', 'message': 'Support is currently on another call'})
-        return
-
-    session_id = str(uuid.uuid4())
-    call_sessions[session_id] = {
-        'user_sid': request.sid,
-        'user_name': data.get('user_name'),
-        'ticket_id': data.get('ticket_id'),
-        'support_sid': None
-    }
-
-    socketio.emit('incoming_call', {
-        'session_id': session_id,
-        'user_name': data.get('user_name'),
-        'ticket_id': data.get('ticket_id')
-    }, room=support_person['sid'])
-    emit('call_status', {'status': 'ringing', 'session_id': session_id})
-
-
-@socketio.on('call_accept')
-def handle_call_accept(data):
-    session_id = data.get('session_id')
-    session = call_sessions.get(session_id)
-    if not session:
-        return
-
-    support_person['busy'] = True
-    session['support_sid'] = request.sid
-
-    socketio.emit('call_accepted', {
-        'session_id': session_id,
-        'support_sid': request.sid
-    }, room=session['user_sid'])
-
-    emit('call_status', {'status': 'in_call', 'session_id': session_id})
-
-
-@socketio.on('call_reject')
-def handle_call_reject(data):
-    session_id = data.get('session_id')
-    session = call_sessions.pop(session_id, None)
-    support_person['busy'] = False
-    if session:
-        socketio.emit('call_status', {
-            'status': 'rejected',
-            'message': 'Support declined the call'
-        }, room=session['user_sid'])
-
-
-@socketio.on('call_end')
-def handle_call_end(data):
-    session_id = data.get('session_id')
-    session = call_sessions.pop(session_id, None)
-    support_person['busy'] = False
-
-    if session:
-        socketio.emit('call_ended', {'session_id': session_id}, room=session['user_sid'])
-        if session.get('support_sid'):
-            socketio.emit('call_ended', {'session_id': session_id}, room=session['support_sid'])
-
-
-@socketio.on('webrtc_offer')
-def handle_webrtc_offer(data):
-    target = data.get('target_sid')
-    socketio.emit('webrtc_offer', {
-        'sdp': data.get('sdp'),
-        'session_id': data.get('session_id'),
-        'from': request.sid
-    }, room=target)
-
-
-@socketio.on('webrtc_answer')
-def handle_webrtc_answer(data):
-    target = data.get('target_sid')
-    socketio.emit('webrtc_answer', {
-        'sdp': data.get('sdp'),
-        'session_id': data.get('session_id'),
-        'from': request.sid
-    }, room=target)
-
-
-@socketio.on('webrtc_ice')
-def handle_webrtc_ice(data):
-    target = data.get('target_sid')
-    candidate = data.get('candidate')
-    socketio.emit('webrtc_ice', {
-        'candidate': candidate,
-        'from': request.sid
-    }, room=target)
-
-
 @socketio.on('update_ticket_status')
 def handle_update_status(data):
     # Validate session
@@ -1428,7 +1269,7 @@ import uuid
 
 from google.oauth2 import service_account
 
-def upload_file_to_gcs_from_path(file_path: str, filename: str, content_type: str = "image/jpeg") -> str:
+def upload_file_to_gcs_from_path(file_path: str, filename: str) -> str:
     credentials = service_account.Credentials.from_service_account_info(
         {
             "type": "service_account",
@@ -1447,7 +1288,7 @@ def upload_file_to_gcs_from_path(file_path: str, filename: str, content_type: st
 
     blob.upload_from_filename(
         file_path,
-        content_type=content_type
+        content_type="image/jpeg"  # don't be lazy, detect this
     )
 
     blob.cache_control = "public, max-age=2592000, immutable"
@@ -1471,12 +1312,8 @@ def upload():
     f.save(local_path)
 
     try:
-        voice_duration = float(request.form.get("voice_duration") or 0)
-        if voice_duration > 60:
-            raise ValueError("Voice notes cannot be longer than 60 seconds")
         # Upload to GCP and get the real URL
-        content_type = f.content_type or "application/octet-stream"
-        gcp_url = upload_file_to_gcs_from_path(local_path, f.filename, content_type)
+        gcp_url = upload_file_to_gcs_from_path(local_path, f.filename)
         os.remove(local_path)  # Clean up local file
         
         # Generate a unique file ID

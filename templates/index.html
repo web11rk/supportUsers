@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Orange Support - Get Help Instantly</title>
+    <title>Web11 Support - Get Help Instantly</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { 
@@ -26,7 +26,7 @@
         .logo {
             text-align: center;
             margin-bottom: 20px;
-            background: #FFA500;
+            background: #b91c1b;
             padding: 20px;
             margin: -40px -40px 20px -40px;
             border-radius: 20px 20px 0 0;
@@ -351,21 +351,12 @@
                 font-size: 16px;
             }
         }
-        .logo-badge {
-            margin-right: 15px;
-            font-weight: 700;
-            color: white;
-            font-size: 20px;
-            letter-spacing: 0.05em;
-        }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="logo">
-           <span class="logo-badge">
-                ORANGE
-            </span>
+            <img src="https://web11.co/logo.png" alt="Web11">
         </div>
         <h1>💬 Customer Support</h1>
         <p class="subtitle">Get instant help from our support team</p>
@@ -379,9 +370,8 @@
         <!-- User Support Access (No Login) -->
         <form action="/user/quick-access" method="POST">
             <div class="form-group">
-                <label for="user_phone">📱 Your Phone Number</label>
-                <input type="tel" id="user_phone" name="phone" placeholder="+1234567890" required autofocus
-                       pattern="\+?[0-9]{7,15}" inputmode="numeric" title="Enter a phone number with digits only (7-15 chars).">
+                <label for="user_email">📧 Your Email Address</label>
+                <input type="email" id="user_email" name="email" placeholder="your@email.com" required autofocus>
             </div>
             <button type="submit" class="btn">
                 💬 Start Chat
@@ -391,7 +381,7 @@
         <div class="info-box">
             <h3>⚡ Fast & Easy Support</h3>
             <p>
-                No account or password needed! Just enter your phone number and connect with our support team instantly.
+                No account or password needed! Just enter your email and connect with our support team instantly.
                 We'll keep track of your conversations securely.
             </p>
         </div>

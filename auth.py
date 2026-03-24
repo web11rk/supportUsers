@@ -21,12 +21,10 @@ class Auth:
     """Authentication and user management"""
     
     @staticmethod
-    def create_user(email, password, name, role='user', phone=None):
+    def create_user(email, password, name, role='user'):
         """Create a new user or admin"""
         # Check if user already exists
-        existing = users_collection.find_one(
-            {"$or": [{"email": email}, {"phone": phone}]} if phone else {"email": email}
-        )
+        existing = users_collection.find_one({"email": email})
         if existing:
             return {"error": "Email already exists"}, False
         
@@ -38,25 +36,15 @@ class Auth:
             "active": True,
             "created_at": datetime.now(),
             "last_login": None
-            ,
-            "phone": phone or ""
         }
         
         result = users_collection.insert_one(user)
         return str(result.inserted_id), True
     
     @staticmethod
-    def authenticate(email=None, password=None, phone=None):
-        """Authenticate user by email or phone"""
-        lookup = None
-        if phone:
-            lookup = {"phone": phone, "active": True}
-        elif email:
-            lookup = {"email": email, "active": True}
-        else:
-            return {"error": "Email or phone is required"}, False
-
-        user = users_collection.find_one(lookup)
+    def authenticate(email, password):
+        """Authenticate user with email and password"""
+        user = users_collection.find_one({"email": email, "active": True})
         
         if user and check_password_hash(user['password'], password):
             # Update last login
@@ -69,8 +57,7 @@ class Auth:
                 "user_id": str(user['_id']),
                 "name": user['name'],
                 "email": user['email'],
-                "role": user.get('role', 'user'),
-                "phone": user.get('phone', '')
+                "role": user.get('role', 'user')
             }, True
         
         return {"error": "Invalid credentials"}, False
@@ -85,8 +72,7 @@ class Auth:
                     "user_id": str(user['_id']),
                     "name": user['name'],
                     "email": user['email'],
-                    "role": user.get('role', 'user'),
-                    "phone": user.get('phone', '')
+                    "role": user.get('role', 'user')
                 }, True
         except:
             pass
