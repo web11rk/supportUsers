@@ -1431,5 +1431,5 @@ if __name__ == '__main__':
     print("=" * 60)
     print("🚀 Starting server on http://localhost:5200")
     print("=" * 60)
-    socketio.run(app, debug=False, host='0.0.0.0', port=5010,allow_unsafe_werkzeug=True  # <-- add this
+    socketio.run(app, debug=False, host='0.0.0.0', port=5010,allow_unsafe_werkzeug=True  # <-- add this //5010
 )
