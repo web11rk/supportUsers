@@ -24,7 +24,7 @@ limiter = Limiter(
     app=app,
     key_func=get_remote_address,
     default_limits=["10000 per day", "500 per hour"],
-    storage_uri=os.getenv('REDIS_URL', 'redis://localhost:6379')
+    storage_uri=os.getenv('REDIS_URL','redis://default:lmNHNCLBbLimIWuRlHOipVzEbOEpxcJY@maglev.proxy.rlwy.net:36764' )#'redis://localhost:6379'
 )
 
 # Authentication decorators (support both JWT and Session)
@@ -77,7 +77,7 @@ def admin_required(f):
 
 # Redis configuration for session management
 app.config['SESSION_TYPE'] = 'redis'
-app.config['SESSION_REDIS'] = redis.from_url('redis://localhost:6379')
+app.config['SESSION_REDIS'] = redis.from_url('redis://default:lmNHNCLBbLimIWuRlHOipVzEbOEpxcJY@maglev.proxy.rlwy.net:36764')
 app.config['SESSION_PERMANENT'] = False
 app.config['SESSION_USE_SIGNER'] = True
 app.config['SESSION_KEY_PREFIX'] = 'support_system:'
