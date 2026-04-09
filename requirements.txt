@@ -10,3 +10,7 @@ werkzeug==2.3.7
 PyJWT==2.8.0
 requests==2.31.0
 python-dotenv
+google-auth==2.49.1
+google-cloud==0.34.0
+google-cloud-core==2.5.0
+google-cloud-storage==3.9.0
