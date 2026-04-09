@@ -6,15 +6,24 @@ from datetime import datetime
 import os
 from dotenv import load_dotenv
 load_dotenv()
+import json
 # MongoDB connection
-MONGO_URI = os.getenv('MONGO_URI', 'mongodb://localhost:27017/')
-mongo_client = MongoClient(MONGO_URI)
-db = mongo_client['support_system_db']
+# MONGO_URI = os.getenv('MONGO_URI', 'mongodb://localhost:27017/')
+# mongo_client = MongoClient(MONGO_URI)
+# db = mongo_client['support_system_db']
+
+import redis
+
+# Redis connection
+REDIS_URI = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
+redis_client = redis.StrictRedis.from_url(REDIS_URI)
+
+
 
 # Collections
-users_collection = db['users']
-admins_collection = db['admins']
-sessions_collection = db['sessions']
+# users_collection = db['users']
+# admins_collection = db['admins']
+# sessions_collection = db['sessions']
 
 
 class Auth:
@@ -44,15 +53,17 @@ class Auth:
     @staticmethod
     def authenticate(email, password):
         """Authenticate user with email and password"""
-        user = users_collection.find_one({"email": email, "active": True})
-        
+        getUserRedis = redis_client.get(f"user:{email}")
+        user = json.loads(getUserRedis) if getUserRedis else {} #users_collection.find_one({"email": email, "active": True})
+        print("getUserRedis", user)
+
         if user and check_password_hash(user['password'], password):
             # Update last login
-            users_collection.update_one(
-                {"_id": user['_id']},
-                {"$set": {"last_login": datetime.now()}}
-            )
-            
+            # users_collection.update_one(
+            #     {"_id": user['_id']},
+            #     {"$set": {"last_login": datetime.now()}}
+            # )
+           
             return {
                 "user_id": str(user['_id']),
                 "name": user['name'],
@@ -66,7 +77,8 @@ class Auth:
     def get_user_by_id(user_id):
         """Get user by MongoDB ObjectId"""
         try:
-            user = users_collection.find_one({"_id": ObjectId(user_id), "active": True})
+            redisUer = redis_client.get(f"user_id:{user_id}")
+            user = json.loads(redisUer) if redisUer else {} #users_collection.find_one({"_id": ObjectId(user_id), "active": True})
             if user:
                 return {
                     "user_id": str(user['_id']),
