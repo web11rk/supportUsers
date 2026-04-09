@@ -591,7 +591,6 @@ else:
     redis_client = redis.from_url(os.getenv('REDIS_URL', 'redis://localhost:6379'))
     print("✅ Standalone Redis mode")
 
-redis_client = "redis://default:lmNHNCLBbLimIWuRlHOipVzEbOEpxcJY@maglev.proxy.rlwy.net:36764"
 session_manager = RedisSessionManager(redis_client)
 ticket_manager = RedisTicketManager(redis_client)
 read_status_manager = RedisReadStatusManager(redis_client)
