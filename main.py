@@ -350,7 +350,12 @@ class RedisTicketManager:
         # Ticket status indexes for filtering
         self.active_tickets_key = "support_system:tickets:active"  # Open + In Progress
         self.resolved_tickets_key = "support_system:tickets:resolved"  # Resolved + Closed
-        
+
+        # Sorted sets scored by updated_at timestamp → O(log N) paged reads
+        self.active_sorted_key = "support_system:tickets:active:sorted"
+        self.resolved_sorted_key = "support_system:tickets:resolved:sorted"
+        self.all_sorted_key = "support_system:tickets:all:sorted"
+
         # TTL for resolved tickets (optional - 0 means keep forever)
         self.resolved_ticket_ttl = int(os.getenv('RESOLVED_TICKET_TTL', 2592000))  # 30 days default
         
@@ -406,7 +411,12 @@ class RedisTicketManager:
         # If user_id provided, also index by user_id
         if user_id:
             self.redis.sadd(f"{self.user_tickets_prefix}uid:{user_id}", ticket_id)
-        
+
+        # Add to sorted sets for time-ordered pagination
+        ts = datetime.datetime.now().timestamp()
+        self.redis.zadd(self.all_sorted_key, {ticket_id: ts})
+        self.redis.zadd(self.active_sorted_key, {ticket_id: ts})
+
         # Create Ticket object
         ticket_data['messages'] = []
         return Ticket.from_dict(ticket_data)
@@ -458,15 +468,25 @@ class RedisTicketManager:
 
         pipe.hset(ticket_key, mapping=redis_data)
 
+        # Sorted set score = updated_at timestamp
+        try:
+            ts = datetime.datetime.fromisoformat(ticket.updated_at).timestamp()
+        except (TypeError, ValueError):
+            ts = datetime.datetime.now().timestamp()
+
+        pipe.zadd(self.all_sorted_key, {ticket.ticket_id: ts})
+
         # Update status indexes based on current status
         if status in ['Open', 'In Progress']:
-            # Move to active index (remove from resolved if it was there)
             pipe.sadd(self.active_tickets_key, ticket.ticket_id)
             pipe.srem(self.resolved_tickets_key, ticket.ticket_id)
+            pipe.zadd(self.active_sorted_key, {ticket.ticket_id: ts})
+            pipe.zrem(self.resolved_sorted_key, ticket.ticket_id)
         elif status in ['Resolved', 'Closed']:
-            # Move to resolved index (remove from active)
             pipe.srem(self.active_tickets_key, ticket.ticket_id)
             pipe.sadd(self.resolved_tickets_key, ticket.ticket_id)
+            pipe.zrem(self.active_sorted_key, ticket.ticket_id)
+            pipe.zadd(self.resolved_sorted_key, {ticket.ticket_id: ts})
 
             # Set TTL on resolved tickets (optional - 0 means keep forever)
             if self.resolved_ticket_ttl > 0:
@@ -675,6 +695,9 @@ class RedisTicketManager:
         pipe.srem(self.ticket_list_key, ticket_id)
         pipe.srem(self.active_tickets_key, ticket_id)
         pipe.srem(self.resolved_tickets_key, ticket_id)
+        pipe.zrem(self.all_sorted_key, ticket_id)
+        pipe.zrem(self.active_sorted_key, ticket_id)
+        pipe.zrem(self.resolved_sorted_key, ticket_id)
 
         # Remove user indexes
         if user_name:
@@ -689,6 +712,83 @@ class RedisTicketManager:
 
         pipe.execute()
         return True
+
+    def get_paged_summaries_from_sorted_set(self, sorted_key, offset, limit):
+        """Fetch a time-ordered page of summaries via ZREVRANGE.
+
+        O(log N + M) instead of O(N) — only the requested page is loaded.
+        Returns (summaries_list, total_count).
+        """
+        pipe = self.redis.pipeline(transaction=False)
+        pipe.zrevrange(sorted_key, offset, offset + limit - 1)
+        pipe.zcard(sorted_key)
+        ids_raw, total = pipe.execute()
+
+        ids = [tid.decode() if isinstance(tid, bytes) else tid for tid in ids_raw]
+        if not ids:
+            return [], int(total)
+
+        pipe2 = self.redis.pipeline(transaction=False)
+        for tid in ids:
+            pipe2.hmget(f"{self.ticket_prefix}{tid}", self.summary_fields)
+        rows = pipe2.execute()
+
+        summaries = []
+        for row in rows:
+            decoded = self._decode_summary_row(row)
+            if decoded:
+                summaries.append(decoded)
+        return summaries, int(total)
+
+    def migrate_to_sorted_sets(self):
+        """One-time migration: populate sorted sets from existing plain SET indexes.
+
+        Idempotent — safe to call on every startup, skips if already populated.
+        """
+        if self.redis.zcard(self.all_sorted_key) > 0:
+            return  # Already migrated
+
+        all_ids = self.redis.smembers(self.ticket_list_key)
+        if not all_ids:
+            return
+
+        ids = [tid.decode() if isinstance(tid, bytes) else tid for tid in all_ids]
+
+        # Batch-fetch updated_at + status for every ticket
+        pipe = self.redis.pipeline(transaction=False)
+        for tid in ids:
+            pipe.hmget(f"{self.ticket_prefix}{tid}", ['updated_at', 'status'])
+        rows = pipe.execute()
+
+        all_scores = {}
+        active_scores = {}
+        resolved_scores = {}
+
+        for i, row in enumerate(rows):
+            tid = ids[i]
+            updated_at_raw = row[0].decode() if isinstance(row[0], bytes) else row[0]
+            status_raw = row[1].decode() if isinstance(row[1], bytes) else row[1]
+            if not updated_at_raw:
+                continue
+            try:
+                ts = datetime.datetime.fromisoformat(updated_at_raw).timestamp()
+            except (TypeError, ValueError):
+                continue
+            all_scores[tid] = ts
+            if status_raw in ['Open', 'In Progress']:
+                active_scores[tid] = ts
+            elif status_raw in ['Resolved', 'Closed']:
+                resolved_scores[tid] = ts
+
+        pipe2 = self.redis.pipeline(transaction=False)
+        if all_scores:
+            pipe2.zadd(self.all_sorted_key, all_scores)
+        if active_scores:
+            pipe2.zadd(self.active_sorted_key, active_scores)
+        if resolved_scores:
+            pipe2.zadd(self.resolved_sorted_key, resolved_scores)
+        pipe2.execute()
+        print(f"✅ Migrated {len(all_scores)} tickets to sorted sets")
 
 
 # ==================== REDIS READ STATUS MANAGER ====================
@@ -759,6 +859,9 @@ else:
 session_manager = RedisSessionManager(redis_client)
 ticket_manager = RedisTicketManager(redis_client)
 read_status_manager = RedisReadStatusManager(redis_client)
+
+# Populate sorted sets from existing tickets (idempotent — skips if already done)
+ticket_manager.migrate_to_sorted_sets()
 
 
 # ==================== HELPER FUNCTIONS ====================
@@ -1086,20 +1189,25 @@ def api_support_tickets():
     compact = request.args.get('compact', 'false').lower() == 'true'
     page, limit = get_request_pagination()
 
-    # Get tickets based on filter (defaults to active for performance)
+    # Pick sorted set by filter — ZREVRANGE gives latest-first page without loading all tickets
     if status_filter == 'active':
-        tickets = ticket_manager.get_active_ticket_summaries()
+        sorted_key = ticket_manager.active_sorted_key
     elif status_filter == 'resolved':
-        tickets = ticket_manager.get_resolved_ticket_summaries()
-    elif status_filter == 'all':
-        tickets = ticket_manager.get_all_ticket_summaries()
-    else:
-        # fallback for specific status names
-        tickets = [t for t in ticket_manager.get_all_ticket_summaries()
-                   if (t.get('status') or '').lower().replace(' ', '_') == status_filter.lower()]
+        sorted_key = ticket_manager.resolved_sorted_key
+    else:  # 'all' or any other value
+        sorted_key = ticket_manager.all_sorted_key
 
-    tickets = sort_tickets_for_list(tickets)
-    paged_tickets, pagination = paginate_list(tickets, page, limit)
+    offset = (page - 1) * limit
+    paged_tickets, total = ticket_manager.get_paged_summaries_from_sorted_set(sorted_key, offset, limit)
+
+    pagination = {
+        'page': page,
+        'limit': limit,
+        'total': total,
+        'has_more': (offset + limit) < total,
+        'total_pages': (total + limit - 1) // limit if limit else 1
+    }
+
     tickets_data = [build_ticket_summary(t) for t in paged_tickets]
     
     # Add unread counts using ticket_id directly
