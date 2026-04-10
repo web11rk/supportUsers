@@ -1,16 +1,16 @@
 from flask import Flask, render_template, request, redirect, url_for, session, jsonify, render_template_string, make_response, Response
-from flask_socketio import SocketIO, send, join_room, leave_room, emit
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 import os
 import datetime
+import json
 from collections import deque
 from enum import Enum
 import redis
 from flask_session import Session
 from functools import wraps
 from auth import Auth, init_default_admin
-from jwt_auth import JWTAuth, jwt_required, jwt_admin_required, validate_socketio_token
+from jwt_auth import JWTAuth, jwt_required, jwt_admin_required
 import requests
 
 from dotenv import load_dotenv
@@ -85,7 +85,10 @@ app.config['SESSION_KEY_PREFIX'] = 'support_system:'
 # Initialize session
 Session(app)
 
-socketio = SocketIO(app, cors_allowed_origins="*")
+DEFAULT_TICKET_PAGE_SIZE = 25
+MAX_TICKET_PAGE_SIZE = 100
+DEFAULT_MESSAGE_PAGE_SIZE = 30
+MAX_MESSAGE_PAGE_SIZE = 100
 
 
 # ==================== DATA MODELS ====================
@@ -354,6 +357,12 @@ class RedisTicketManager:
         # Initialize counter from Redis or start at 1000
         if not self.redis.exists(self.ticket_counter_key):
             self.redis.set(self.ticket_counter_key, 1000)
+
+        self.summary_fields = [
+            'ticket_id', 'user_name', 'user_id', 'subject', 'description',
+            'priority', 'status', 'created_at', 'updated_at', 'assigned_to', 'room_id',
+            'message_count', 'last_message', 'last_message_at', 'last_message_sender', 'last_message_type'
+        ]
     
     def create_ticket(self, user_name, subject, description, priority="MEDIUM", user_id=None):
         """Create a new ticket and store in Redis"""
@@ -374,7 +383,12 @@ class RedisTicketManager:
             'updated_at': datetime.datetime.now().isoformat(),
             'messages': '[]',  # Store as JSON string
             'assigned_to': '',
-            'room_id': ticket_id
+            'room_id': ticket_id,
+            'message_count': '0',
+            'last_message': '',
+            'last_message_at': datetime.datetime.now().isoformat(),
+            'last_message_sender': user_name,
+            'last_message_type': 'user'
         }
         
         # Store in Redis
@@ -411,38 +425,54 @@ class RedisTicketManager:
             ticket_dict[key_str] = value_str
         
         # Parse messages JSON
-        import json
         ticket_dict['messages'] = json.loads(ticket_dict.get('messages', '[]'))
         
         return Ticket.from_dict(ticket_dict)
     
     def update_ticket(self, ticket):
         """Update a ticket in Redis and manage status indexes"""
-        import json
         ticket_dict = ticket.to_dict()
         
         # Convert messages to JSON string
         redis_data = ticket_dict.copy()
         redis_data['messages'] = json.dumps(ticket_dict['messages'])
         redis_data['assigned_to'] = redis_data['assigned_to'] or ''
+        redis_data['message_count'] = str(len(ticket_dict['messages']))
+
+        if ticket_dict['messages']:
+            last_msg = ticket_dict['messages'][-1]
+            redis_data['last_message'] = last_msg.get('message', '')
+            redis_data['last_message_at'] = last_msg.get('timestamp', ticket.updated_at)
+            redis_data['last_message_sender'] = last_msg.get('sender', ticket.user_name)
+            redis_data['last_message_type'] = last_msg.get('sender_type', 'user')
+        else:
+            redis_data['last_message'] = ticket.description
+            redis_data['last_message_at'] = ticket.updated_at
+            redis_data['last_message_sender'] = ticket.user_name
+            redis_data['last_message_type'] = 'user'
         
-        # Store in Redis
-        self.redis.hset(f"{self.ticket_prefix}{ticket.ticket_id}", mapping=redis_data)
-        
-        # Update status indexes based on current status
+        # Store and index updates in one batch (fewer network round-trips)
         status = ticket.status
+        ticket_key = f"{self.ticket_prefix}{ticket.ticket_id}"
+        pipe = self.redis.pipeline(transaction=False)
+
+        pipe.hset(ticket_key, mapping=redis_data)
+
+        # Update status indexes based on current status
         if status in ['Open', 'In Progress']:
             # Move to active index (remove from resolved if it was there)
-            self.redis.sadd(self.active_tickets_key, ticket.ticket_id)
-            self.redis.srem(self.resolved_tickets_key, ticket.ticket_id)
+            pipe.sadd(self.active_tickets_key, ticket.ticket_id)
+            pipe.srem(self.resolved_tickets_key, ticket.ticket_id)
         elif status in ['Resolved', 'Closed']:
             # Move to resolved index (remove from active)
-            self.redis.srem(self.active_tickets_key, ticket.ticket_id)
-            self.redis.sadd(self.resolved_tickets_key, ticket.ticket_id)
-            
+            pipe.srem(self.active_tickets_key, ticket.ticket_id)
+            pipe.sadd(self.resolved_tickets_key, ticket.ticket_id)
+
             # Set TTL on resolved tickets (optional - 0 means keep forever)
             if self.resolved_ticket_ttl > 0:
-                self.redis.expire(f"{self.ticket_prefix}{ticket.ticket_id}", self.resolved_ticket_ttl)
+                pipe.expire(ticket_key, self.resolved_ticket_ttl)
+
+        pipe.execute()
     
     def get_all_tickets(self):
         """Get all tickets from Redis"""
@@ -493,6 +523,71 @@ class RedisTicketManager:
             if ticket:
                 tickets.append(ticket)
         return tickets
+
+    def _decode_summary_row(self, row):
+        if not row:
+            return None
+
+        data = {}
+        for i, field in enumerate(self.summary_fields):
+            value = row[i] if i < len(row) else None
+            if isinstance(value, bytes):
+                value = value.decode()
+            data[field] = value
+
+        if not data.get('ticket_id'):
+            return None
+
+        try:
+            data['message_count'] = int(data.get('message_count') or 0)
+        except (TypeError, ValueError):
+            data['message_count'] = 0
+
+        data['user_id'] = data.get('user_id') or ''
+        data['assigned_to'] = data.get('assigned_to') or ''
+        data['last_message'] = data.get('last_message') or data.get('description') or ''
+        data['last_message_at'] = data.get('last_message_at') or data.get('updated_at')
+        data['last_message_sender'] = data.get('last_message_sender') or data.get('user_name')
+        data['last_message_type'] = data.get('last_message_type') or 'user'
+
+        return data
+
+    def get_ticket_summary(self, ticket_id):
+        key = f"{self.ticket_prefix}{ticket_id}"
+        row = self.redis.hmget(key, self.summary_fields)
+        return self._decode_summary_row(row)
+
+    def _get_summaries_from_ids(self, ticket_ids):
+        ids = [tid.decode() if isinstance(tid, bytes) else tid for tid in ticket_ids]
+        if not ids:
+            return []
+        pipe = self.redis.pipeline(transaction=False)
+        for tid in ids:
+            pipe.hmget(f"{self.ticket_prefix}{tid}", self.summary_fields)
+
+        rows = pipe.execute()
+        summaries = []
+        for row in rows:
+            decoded = self._decode_summary_row(row)
+            if decoded:
+                summaries.append(decoded)
+        return summaries
+
+    def get_active_ticket_summaries(self):
+        ticket_ids = self.redis.smembers(self.active_tickets_key)
+        return self._get_summaries_from_ids(ticket_ids)
+
+    def get_resolved_ticket_summaries(self):
+        ticket_ids = self.redis.smembers(self.resolved_tickets_key)
+        return self._get_summaries_from_ids(ticket_ids)
+
+    def get_all_ticket_summaries(self):
+        ticket_ids = self.redis.smembers(self.ticket_list_key)
+        return self._get_summaries_from_ids(ticket_ids)
+
+    def get_user_ticket_summaries(self, user_name):
+        ticket_ids = self.redis.smembers(f"{self.user_tickets_prefix}{user_name}")
+        return self._get_summaries_from_ids(ticket_ids)
     
     def get_resolved_tickets(self):
         """Get all resolved/closed tickets - Fast using index"""
@@ -529,6 +624,72 @@ class RedisTicketManager:
             'resolved': self.redis.scard(self.resolved_tickets_key)
         }
 
+    def get_ticket_messages_page(self, ticket_id, limit=DEFAULT_MESSAGE_PAGE_SIZE, before=None):
+        """Get one page of messages for a ticket.
+
+        Messages are returned in normal chronological order.
+        `before` represents the end index boundary for older-message loading.
+        """
+        ticket = self.get_ticket(ticket_id)
+        if not ticket:
+            return None, None
+
+        messages = ticket.messages or []
+        total_messages = len(messages)
+
+        limit = max(1, min(limit, MAX_MESSAGE_PAGE_SIZE))
+
+        if before is None:
+            end_index = total_messages
+        else:
+            end_index = max(0, min(before, total_messages))
+
+        start_index = max(0, end_index - limit)
+        page_messages = messages[start_index:end_index]
+
+        return ticket, {
+            'messages': page_messages,
+            'message_count': total_messages,
+            'messages_loaded': len(page_messages),
+            'has_more_messages': start_index > 0,
+            'next_before': start_index if start_index > 0 else None
+        }
+
+    def delete_ticket(self, ticket_id):
+        """Delete ticket and related indexes/counters from Redis."""
+        ticket_key = f"{self.ticket_prefix}{ticket_id}"
+        if not self.redis.exists(ticket_key):
+            return False
+
+        # Fetch minimal owner fields for index cleanup
+        user_name, user_id = self.redis.hmget(ticket_key, ['user_name', 'user_id'])
+        if isinstance(user_name, bytes):
+            user_name = user_name.decode()
+        if isinstance(user_id, bytes):
+            user_id = user_id.decode()
+
+        pipe = self.redis.pipeline(transaction=False)
+
+        # Remove main ticket data + status/global indexes
+        pipe.delete(ticket_key)
+        pipe.srem(self.ticket_list_key, ticket_id)
+        pipe.srem(self.active_tickets_key, ticket_id)
+        pipe.srem(self.resolved_tickets_key, ticket_id)
+
+        # Remove user indexes
+        if user_name:
+            pipe.srem(f"{self.user_tickets_prefix}{user_name}", ticket_id)
+        if user_id:
+            pipe.srem(f"{self.user_tickets_prefix}uid:{user_id}", ticket_id)
+
+        # Remove unread counters (support + user variants)
+        unread_pattern = f"support_system:unread_count:{ticket_id}:*"
+        for key in self.redis.scan_iter(match=unread_pattern, count=20):
+            pipe.delete(key)
+
+        pipe.execute()
+        return True
+
 
 # ==================== REDIS READ STATUS MANAGER ====================
 
@@ -552,7 +713,11 @@ class RedisReadStatusManager:
     
     def get_unread_count(self, ticket, user_identifier):
         """Get unread count for a ticket"""
-        key = f"{self.unread_count_prefix}{ticket.ticket_id}:{user_identifier}"
+        return self.get_unread_count_by_ticket_id(ticket.ticket_id, user_identifier)
+
+    def get_unread_count_by_ticket_id(self, ticket_id, user_identifier):
+        """Get unread count using ticket_id directly (faster for list APIs)."""
+        key = f"{self.unread_count_prefix}{ticket_id}:{user_identifier}"
         count = self.redis.get(key)
         if count:
             count = int(count.decode() if isinstance(count, bytes) else count)
@@ -615,17 +780,83 @@ def get_all_tickets():
     return [t.to_dict() for t in tickets]
 
 
+def build_ticket_summary(ticket):
+    """Return a lightweight summary for ticket list views."""
+    if isinstance(ticket, dict):
+        return ticket
+
+    last_message = ticket.messages[-1] if ticket.messages else None
+    return {
+        'ticket_id': ticket.ticket_id,
+        'user_name': ticket.user_name,
+        'user_id': ticket.user_id,
+        'subject': ticket.subject,
+        'description': ticket.description,
+        'priority': ticket.priority,
+        'status': ticket.status,
+        'created_at': ticket.created_at,
+        'updated_at': ticket.updated_at,
+        'assigned_to': ticket.assigned_to,
+        'room_id': ticket.room_id,
+        'message_count': len(ticket.messages),
+        'last_message': last_message['message'] if last_message else ticket.description,
+        'last_message_at': last_message['timestamp'] if last_message else ticket.updated_at,
+        'last_message_sender': last_message['sender'] if last_message else ticket.user_name,
+        'last_message_type': last_message['sender_type'] if last_message else 'user'
+    }
+
+
+def sort_tickets_for_list(tickets):
+    """Sort tickets for list endpoints by `updated_at` (newest first)."""
+    def read_field(item, field, default=None):
+        if isinstance(item, dict):
+            return item.get(field, default)
+        return getattr(item, field, default)
+
+    def read_updated_at_timestamp(item):
+        raw = read_field(item, 'updated_at')
+        if not raw:
+            return 0
+        try:
+            return datetime.datetime.fromisoformat(raw).timestamp()
+        except (TypeError, ValueError):
+            return 0
+
+    return sorted(tickets, key=read_updated_at_timestamp, reverse=True)
+
+
+def paginate_list(items, page, limit):
+    total = len(items)
+    start = (page - 1) * limit
+    end = start + limit
+    paged_items = items[start:end]
+    return paged_items, {
+        'page': page,
+        'limit': limit,
+        'total': total,
+        'has_more': end < total,
+        'total_pages': (total + limit - 1) // limit if limit else 1
+    }
+
+
+def get_request_pagination(default_limit=DEFAULT_TICKET_PAGE_SIZE, max_limit=MAX_TICKET_PAGE_SIZE):
+    try:
+        page = max(int(request.args.get('page', 1)), 1)
+    except (TypeError, ValueError):
+        page = 1
+
+    try:
+        limit = int(request.args.get('limit', default_limit))
+    except (TypeError, ValueError):
+        limit = default_limit
+
+    limit = max(1, min(limit, max_limit))
+    return page, limit
+
+
 def notify_support_person(event, data):
-    """Notify support person about events"""
-    if support_person["online"] and support_person["sid"]:
-        # Validate support session is still active
-        session_data = session_manager.get_session(support_person["sid"])
-        if session_data:
-            socketio.emit(event, data, room=support_person["sid"])
-        else:
-            # Session expired, mark support as offline
-            support_person["online"] = False
-            support_person["sid"] = None
+    """Socket notifications removed (API-only mode)."""
+    return
 
 
 # ==================== HTML TEMPLATES ====================
@@ -827,43 +1058,73 @@ def support_dashboard_classic():
 def api_user_tickets():
     username = request.args.get('username')
     user_email = request.args.get('user_email', username)  # For unread counts
-    tickets_data = get_user_tickets(username)
+    include_meta = request.args.get('include_meta', 'false').lower() == 'true'
+    page, limit = get_request_pagination()
+
+    tickets = sort_tickets_for_list(ticket_manager.get_user_ticket_summaries(username))
+    paged_tickets, pagination = paginate_list(tickets, page, limit)
+    tickets_data = [build_ticket_summary(ticket) for ticket in paged_tickets]
     
-    # Add unread counts
+    # Add unread counts using ticket_id directly
     for ticket_data in tickets_data:
-        ticket = ticket_manager.get_ticket(ticket_data['ticket_id'])
-        if ticket:
-            ticket_data['unread_count'] = read_status_manager.get_unread_count(ticket, user_email)
-    
+        ticket_data['unread_count'] = read_status_manager.get_unread_count_by_ticket_id(
+            ticket_data['ticket_id'], user_email
+        )
+
+    if include_meta:
+        return jsonify({'tickets': tickets_data, 'pagination': pagination})
+
     return jsonify(tickets_data)
 
 
 @app.route('/api/support/tickets')
 @limiter.limit("60 per minute")
 def api_support_tickets():
-    support_email = request.args.get('support_email', 'support')  # For unread counts
+    support_email = request.args.get('support_email', 'support')  # kept for API compatibility
     status_filter = request.args.get('status', 'active')  # Filter: 'all', 'active', 'resolved'
-    
+    include_meta = request.args.get('include_meta', 'false').lower() == 'true'
+    compact = request.args.get('compact', 'false').lower() == 'true'
+    page, limit = get_request_pagination()
+
     # Get tickets based on filter (defaults to active for performance)
     if status_filter == 'active':
-        tickets = ticket_manager.get_active_tickets()
+        tickets = ticket_manager.get_active_ticket_summaries()
     elif status_filter == 'resolved':
-        tickets = ticket_manager.get_resolved_tickets()
+        tickets = ticket_manager.get_resolved_ticket_summaries()
     elif status_filter == 'all':
-        tickets = ticket_manager.get_all_tickets()
+        tickets = ticket_manager.get_all_ticket_summaries()
     else:
-        tickets = ticket_manager.get_tickets_by_status(status_filter)
+        # fallback for specific status names
+        tickets = [t for t in ticket_manager.get_all_ticket_summaries()
+                   if (t.get('status') or '').lower().replace(' ', '_') == status_filter.lower()]
+
+    tickets = sort_tickets_for_list(tickets)
+    paged_tickets, pagination = paginate_list(tickets, page, limit)
+    tickets_data = [build_ticket_summary(t) for t in paged_tickets]
     
-    tickets_data = [t.to_dict() for t in tickets]
-    
-    # Add unread counts for support
-    # Use 'support' as identifier (all support agents see same count)
+    # Add unread counts using ticket_id directly
     for ticket_data in tickets_data:
-        ticket = ticket_manager.get_ticket(ticket_data['ticket_id'])
-        if ticket:
-            # Get unread count using simple counter with 'support' identifier
-            ticket_data['unread_count'] = read_status_manager.get_unread_count(ticket, 'support')
-    
+        ticket_data['unread_count'] = read_status_manager.get_unread_count_by_ticket_id(
+            ticket_data['ticket_id'], 'support'
+        )
+
+    if compact:
+        tickets_data = [{
+            'ticket_id': t.get('ticket_id'),
+            'user_name': t.get('user_name'),
+            'subject': t.get('subject'),
+            'status': t.get('status'),
+            'created_at': t.get('created_at'),
+            'updated_at': t.get('updated_at'),
+            'message_count': t.get('message_count', 0),
+            'last_message': t.get('last_message'),
+            'last_message_at': t.get('last_message_at'),
+            'unread_count': t.get('unread_count', 0)
+        } for t in tickets_data]
+
+    if include_meta:
+        return jsonify({'tickets': tickets_data, 'pagination': pagination})
+
     return jsonify(tickets_data)
 
 
@@ -876,9 +1137,46 @@ def api_ticket_stats():
 
 @app.route('/api/ticket/<ticket_id>')
 def api_ticket_detail(ticket_id):
+    start_time = time.time()
     ticket = ticket_manager.get_ticket(ticket_id)
+    end_time = time.time()
+    print(ticket)
+    print(f"⏱️ Fetched ticket {ticket_id} in {end_time - start_time:.4f} seconds")
     if ticket:
         ticket_data = ticket.to_dict()
+        return jsonify(ticket_data)
+        message_limit = request.args.get('message_limit')
+        before = request.args.get('before')
+
+        if message_limit is not None:
+            try:
+                parsed_limit = max(1, min(int(message_limit), MAX_MESSAGE_PAGE_SIZE))
+            except (TypeError, ValueError):
+                parsed_limit = DEFAULT_MESSAGE_PAGE_SIZE
+
+            try:
+                before_index = int(before) if before is not None else None
+            except (TypeError, ValueError):
+                before_index = None
+
+            _, message_page = ticket_manager.get_ticket_messages_page(
+                ticket_id,
+                limit=parsed_limit,
+                before=before_index
+            )
+
+            if message_page:
+                ticket_data['messages'] = message_page['messages']
+                ticket_data['message_count'] = message_page['message_count']
+                ticket_data['messages_loaded'] = message_page['messages_loaded']
+                ticket_data['has_more_messages'] = message_page['has_more_messages']
+                ticket_data['next_before'] = message_page['next_before']
+        else:
+            ticket_data['message_count'] = len(ticket.messages)
+            ticket_data['messages_loaded'] = len(ticket.messages)
+            ticket_data['has_more_messages'] = False
+            ticket_data['next_before'] = None
+
         # Optionally add unread count if user_identifier provided
         user_identifier = request.args.get('user_identifier')
         if user_identifier:
@@ -947,313 +1245,134 @@ def api_unread_counts():
     return jsonify(unread_counts)
 
 
-# ==================== SOCKET.IO EVENTS ====================
+# ==================== TICKET ACTION APIs (API-ONLY MODE) ====================
 
-@socketio.on('connect')
-def handle_connect():
-    print(f"Client connected: {request.sid}")
+@app.route('/api/tickets', methods=['POST'])
+@limiter.limit("20 per minute")
+def api_create_ticket():
+    """Create ticket via HTTP (Socket removed)."""
+    data = request.get_json(silent=True) or {}
 
-
-@socketio.on('disconnect')
-def handle_disconnect():
-    sid = request.sid
-    
-    # Get session data from Redis
-    session_data = session_manager.get_session(sid)
-    if session_data:
-        username = session_data.get('username')
-        role = session_data.get('role')
-        
-        # Delete session from Redis
-        session_manager.delete_session(sid)
-        
-        # Update support person status if needed
-        # if role == 'support' and support_person['sid'] == sid:
-        support_person['sid'] = None
-        support_person['online'] = False
-
-        print(f"Client disconnected: {sid} (User: {username})")
-    else:
-        print(f"Client disconnected: {sid} (No session data)")
-
-
-@socketio.on('user_join')
-def handle_user_join(data):
-    username = data.get('username')
-    sid = request.sid
-    
-    # Create session in Redis
-    session_manager.create_session(sid, username, 'user')
-    print(f"User joined: {username} (Session: {sid})")
-
-
-@socketio.on('support_join')
-def handle_support_join(data):
-    username = data.get('username')
-    sid = request.sid
-    
-    # Create session in Redis
-    session_manager.create_session(sid, username, 'support')
-    
-    # Update support person status
-    support_person['name'] = username
-    support_person['sid'] = sid
-    support_person['online'] = True
-    
-    print(f"Support person joined: {username} (Session: {sid})")
-
-
-@socketio.on('create_ticket')
-def handle_create_ticket(data):
-    # Validate session
-    if not validate_session():
-        emit('error', {'message': 'Session expired. Please refresh the page.'})
-        return
-        
     user_name = data.get('user_name')
-    user_id = data.get('user_id')  # MongoDB ObjectId or user ID
+    user_id = data.get('user_id')
     subject = data.get('subject')
     description = data.get('description')
     priority = data.get('priority', 'MEDIUM')
 
-    # Rate Limiting: Check if user is creating tickets too quickly
+    if not user_name or not subject or not description:
+        return jsonify({'error': 'user_name, subject and description are required'}), 400
+
     rate_limit_key = f"rate_limit:create_ticket:{user_name}"
     current_time = datetime.datetime.now().timestamp()
-    
-    # Get last ticket creation time
     last_creation_time = redis_client.get(rate_limit_key)
     if last_creation_time:
         time_diff = current_time - float(last_creation_time)
-        cooldown_period = 5  # 5 seconds cooldown
-        
+        cooldown_period = 5
         if time_diff < cooldown_period:
             remaining_time = int(cooldown_period - time_diff)
-            emit('error', {'message': f'⚠️ Please wait {remaining_time} more second(s) before creating another ticket.'})
-            print(f"❌ Rate limit: User {user_name} tried to create ticket too quickly (within {time_diff:.1f}s)")
-            return
-    
-    # Set new rate limit timestamp (expires in 10 seconds)
+            return jsonify({'error': f'⚠️ Please wait {remaining_time} more second(s) before creating another ticket.'}), 429
+
     redis_client.setex(rate_limit_key, 10, current_time)
 
-    # Check if user already has a pending ticket (Open or In Progress)
     user_tickets = ticket_manager.get_user_tickets(user_name)
     pending_tickets = [t for t in user_tickets if t.status in ['Open', 'In Progress']]
-    
     if pending_tickets:
-        emit('error', {'message': '⚠️ You already have a pending ticket. Please wait for it to be resolved before creating a new one.'})
-        print(f"❌ User {user_name} tried to create ticket but has pending ticket: {pending_tickets[0].ticket_id}")
-        return
+        return jsonify({'error': '⚠️ You already have a pending ticket. Please wait for it to be resolved before creating a new one.'}), 400
 
-    # Create ticket in Redis (persistent storage)
     ticket = ticket_manager.create_ticket(user_name, subject, description, priority, user_id)
     ticket_queue.append(ticket.ticket_id)
 
-    # Add the initial description as the first message
     initial_message = ticket.add_message(user_name, description, 'user')
     ticket_manager.update_ticket(ticket)
-    
-    # Set initial unread count for support (user sent first message)
     read_status_manager.increment_unread_count(ticket.ticket_id, 'support')
-    
-    print(f"📝 Added initial message to ticket {ticket.ticket_id}: {description[:50]}...")
-    
-    # Add ticket_id to the message for frontend
+
     initial_message['ticket_id'] = ticket.ticket_id
-
-    # Prepare ticket data for sending
     ticket_data = ticket.to_dict()
-    print(f"📤 Sending ticket_created event with {len(ticket_data.get('messages', []))} messages")
-    
-    # Send to the current client who created the ticket (most reliable)
-    emit('ticket_created', ticket_data)
-    
-    # Also send to stored user session (for multi-device support)
-    user_sid = session_manager.get_user_sid(user_name)
-    if user_sid and user_sid != request.sid:
-        socketio.emit('ticket_created', ticket_data, room=user_sid)
-    
-    # Broadcast the initial message to the ticket room
-    # This ensures anyone who opens the chat sees it immediately
-    socketio.emit('new_message', initial_message, room=ticket.ticket_id)
+    ticket_data['initial_message'] = initial_message
 
-    # Notify support person with updated ticket data (old method - single support)
-    notify_support_person('new_ticket', ticket.to_dict())
-    
-    # Broadcast to ALL connected clients (support staff will see it)
-    # When no room is specified, it broadcasts to all clients
-    socketio.emit('new_ticket', ticket.to_dict())
-
-    print(f"✅ Ticket created in Redis: {ticket.ticket_id} by {user_name} with initial message (Persistent)")
+    return jsonify({'success': True, 'ticket': ticket_data}), 201
 
 
-@socketio.on('join_room')
-def handle_join_room(data):
-    room = data.get('room')
-    join_room(room)
-    session_data = session_manager.get_session(request.sid)
-    username = session_data.get('username', 'Unknown') if session_data else 'Unknown'
-    
-    # Mark ticket as read when user joins the room (they opened the ticket)
-    ticket_id = room  # Room ID is usually the ticket ID
-    if ticket_id and ticket_id.startswith('TKT-'):
-        ticket = ticket_manager.get_ticket(ticket_id)
-        if ticket:
-            # Get user role to determine identifier
-            role = session_data.get('role', 'user') if session_data else 'user'
-            if role in ['admin', 'support']:
-                # Support/admin opened ticket → reset unread count for 'support'
-                read_status_manager.reset_unread_count(ticket_id, 'support')
-            else:
-                # User opened ticket → reset unread count for user
-                user_identifier = session_data.get('email') or username
-                read_status_manager.reset_unread_count(ticket_id, user_identifier)
-            
-            # Notify that ticket was marked as read
-            emit('ticket_marked_read', {
-                'ticket_id': ticket_id,
-                'message': 'Ticket marked as read'
-            })
-    
-    print(f"✅ Client {request.sid} ({username}) joined room {room}")
+@app.route('/api/ticket/<ticket_id>/message', methods=['POST'])
+@limiter.limit("120 per minute")
+def api_send_message(ticket_id):
+    """Send message via HTTP (Socket removed)."""
+    data = request.get_json(silent=True) or {}
 
-
-@socketio.on('leave_room')
-def handle_leave_room(data):
-    room = data.get('room')
-    leave_room(room)
-    print(f"Client {request.sid} left room {room}")
-
-
-@socketio.on('send_message')
-def handle_send_message(data):
-    # Validate session
-    if not validate_session():
-        emit('error', {'message': 'Session expired. Please refresh the page.'})
-        return
-        
-    ticket_id = data.get('ticket_id')
     sender = data.get('sender')
     message = data.get('message')
     sender_type = data.get('sender_type', 'user')
 
-    # Get ticket from Redis
+    if not sender or not message:
+        return jsonify({'error': 'sender and message are required'}), 400
+
     ticket = ticket_manager.get_ticket(ticket_id)
-    if ticket:
-        # Auto-reopen ticket if user sends message on resolved/closed ticket
-        ticket_reopened = False
-        if sender_type == 'user' and ticket.status in ['Resolved', 'Closed']:
-            old_status = ticket.status
-            ticket.update_status('Open')
-            ticket_reopened = True
-            print(f"🔄 Ticket {ticket_id} auto-reopened by user message (was: {old_status})")
-        
-        msg = ticket.add_message(sender, message, sender_type)
+    if not ticket:
+        return jsonify({'error': 'Ticket not found'}), 404
 
-        # Update ticket in Redis
-        ticket_manager.update_ticket(ticket)
-        
-        # Add ticket_id to the message for frontend
-        msg['ticket_id'] = ticket_id
+    ticket_reopened = False
+    if sender_type == 'user' and ticket.status in ['Resolved', 'Closed']:
+        ticket.update_status('Open')
+        ticket_reopened = True
 
-        print(f"Broadcasting message to room {ticket_id}: {msg}")
-        
-        # Broadcast to room (including sender)
-        emit('new_message', msg, room=ticket_id, include_self=True)
+    msg = ticket.add_message(sender, message, sender_type)
+    ticket_manager.update_ticket(ticket)
+    msg['ticket_id'] = ticket_id
 
-        # Simple unread tracking:
-        # - If user sends message → increment unread count for ALL support agents
-        # - If support sends message → increment unread count for user
-        # - Mark sender's own message as read (reset their counter)
-        session_data = session_manager.get_session(request.sid)
-        if session_data:
-            if sender_type == 'user':
-                # User sent message → increment unread for support
-                # For simplicity, increment for a generic 'support' key
-                # All support agents will see the same count
-                # (In production, you might want per-agent tracking)
-                read_status_manager.increment_unread_count(ticket_id, 'support')
-                # Mark as read for the user (they saw their own message)
-                user_identifier = session_data.get('email') or sender
-                read_status_manager.reset_unread_count(ticket_id, user_identifier)
-            else:  # support
-                # Support sent message → increment unread for user
-                # Use user_name (which is the email) as identifier to match user side
-                user_identifier = ticket.user_name  # User's email/name (this is the email)
-                read_status_manager.increment_unread_count(ticket_id, user_identifier)
-                # Mark as read for support (they saw their own message)
-                # Use 'support' identifier consistently (not username)
-                read_status_manager.reset_unread_count(ticket_id, 'support')
-                print(f"📬 Support sent message to {ticket_id}, incremented unread for user: {user_identifier}")
-        
-        # Broadcast ticket list update to ALL connected clients (for unread counts)
-        socketio.emit('ticket_list_update', {
-            'ticket_id': ticket_id,
-            'message': 'New message received'
-        })
-
-        # If ticket was reopened, notify everyone
-        if ticket_reopened:
-            socketio.emit('ticket_updated', {
-                'ticket_id': ticket_id,
-                'status': 'Open',
-                'reopened': True,
-                'message': 'Ticket reopened by user message'
-            }, room=ticket_id)
-            
-            # Notify support person
-            notify_support_person('ticket_reopened', {
-                'ticket_id': ticket_id,
-                'user_name': sender,
-                'message': f'Ticket {ticket_id} was reopened by user message'
-            })
-
-        # Notify support person if message is from user
-        if sender_type == 'user':
-            notify_support_person('new_user_message', {
-                'ticket_id': ticket_id,
-                'user_name': sender,
-                'message': message
-            })
-
-        print(f"✅ Message sent in {ticket_id} by {sender} ({sender_type}) - Saved to Redis")
+    if sender_type == 'user':
+        read_status_manager.increment_unread_count(ticket_id, 'support')
+        read_status_manager.reset_unread_count(ticket_id, sender)
     else:
-        print(f"❌ Ticket {ticket_id} not found!")
-        emit('error', {'message': 'Ticket not found'})
+        user_identifier = ticket.user_name
+        read_status_manager.increment_unread_count(ticket_id, user_identifier)
+        read_status_manager.reset_unread_count(ticket_id, 'support')
+
+    return jsonify({
+        'success': True,
+        'message': msg,
+        'ticket_id': ticket_id,
+        'status': ticket.status,
+        'reopened': ticket_reopened
+    })
 
 
-@socketio.on('update_ticket_status')
-def handle_update_status(data):
-    # Validate session
-    if not validate_session():
-        emit('error', {'message': 'Session expired. Please refresh the page.'})
-        return
-        
-    ticket_id = data.get('ticket_id')
+@app.route('/api/ticket/<ticket_id>/status', methods=['POST'])
+@limiter.limit("60 per minute")
+def api_update_ticket_status(ticket_id):
+    """Update ticket status via HTTP (Socket removed)."""
+    data = request.get_json(silent=True) or {}
     new_status = data.get('status')
 
-    # Get ticket from Redis
+    if not new_status:
+        return jsonify({'error': 'status is required'}), 400
+
     ticket = ticket_manager.get_ticket(ticket_id)
-    if ticket:
-        ticket.update_status(new_status)
+    if not ticket:
+        return jsonify({'error': 'Ticket not found'}), 404
 
-        # Update in Redis
-        ticket_manager.update_ticket(ticket)
+    ticket.update_status(new_status)
+    ticket_manager.update_ticket(ticket)
 
-        # Notify user via Redis session
-        user_sid = session_manager.get_user_sid(ticket.user_name)
-        if user_sid:
-            emit('ticket_updated', {
-                'ticket_id': ticket_id,
-                'status': new_status
-            }, room=user_sid)
+    return jsonify({'success': True, 'ticket_id': ticket_id, 'status': new_status})
 
-        # Broadcast to all in support
-        emit('ticket_updated', {
-            'ticket_id': ticket_id,
-            'status': new_status
-        }, room=ticket_id)
 
-        print(f"✅ Ticket {ticket_id} status updated to {new_status} - Saved to Redis")
+@app.route('/api/ticket/<ticket_id>', methods=['DELETE'])
+@admin_required
+@limiter.limit("30 per minute")
+def api_delete_ticket(ticket_id):
+    """Delete ticket (admin/support only)."""
+    deleted = ticket_manager.delete_ticket(ticket_id)
+    if not deleted:
+        return jsonify({'error': 'Ticket not found'}), 404
+
+    # Best effort: remove from in-memory queue if present
+    try:
+        if ticket_id in ticket_queue:
+            ticket_queue.remove(ticket_id)
+    except ValueError:
+        pass
+
+    return jsonify({'success': True, 'ticket_id': ticket_id})
 
 
 UPLOAD_DIR = "/tmp/uploads"  # /tmp is mandatory on Cloud Run
@@ -1371,12 +1490,8 @@ def serve_file(file_id):
 # ==================== SESSION VALIDATION MIDDLEWARE ====================
 
 def validate_session():
-    """Validate session before processing requests"""
-    sid = request.sid
-    if sid:
-        session_data = session_manager.get_session(sid)
-        if not session_data:
-            return False
+    """HTTP mode: validate session context if needed."""
+    # Socket sessions removed; keep as compatible no-op for existing checks.
     return True
 
 # ==================== PERIODIC CLEANUP ====================
@@ -1401,35 +1516,5 @@ cleanup_thread.start()
 # ==================== RUN APP ====================
 
 if __name__ == '__main__':
-    print("=" * 60)
-    print("🎫 SUPPORT TICKET SYSTEM - Flask SocketIO with MongoDB Auth")
-    print("=" * 60)
     
-    # Initialize default admin if none exists
-    init_default_admin()
-    
-    print("\nFeatures:")
-    print("  ✅ MongoDB User Authentication")
-    print("  ✅ Admin/Support Login System")
-    print("  ✅ Persistent Ticket Storage in Redis")
-    print("  ✅ Tickets survive server restarts")
-    print("  ✅ Redis Session Management")
-    print("  ✅ Session Limitations (3 sessions per user)")
-    print("  ✅ Session Timeout (1 hour)")
-    print("  ✅ Automatic Cleanup")
-    print("  ✅ Real-time Chat")
-    print("=" * 60)
-    print("📦 Storage:")
-    print("  • Users: MongoDB")
-    print("  • Sessions: Redis (1 hour TTL)")
-    print("  • Tickets: Redis (Permanent until deleted)")
-    print("  • Messages: Redis (with tickets)")
-    print("=" * 60)
-    print("🔐 Admin Management:")
-    print("  • Run: python create_admin.py")
-    print("  • Create admins, support users, and test users")
-    print("=" * 60)
-    print("🚀 Starting server on http://localhost:5200")
-    print("=" * 60)
-    socketio.run(app, debug=False, host='0.0.0.0', port=5010,allow_unsafe_werkzeug=True  # <-- add this //5010
-)
+    app.run(debug=False, host='0.0.0.0', port=5010)

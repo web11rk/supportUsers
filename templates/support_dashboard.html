@@ -2,7 +2,6 @@
 <html>
 <head>
     <title>Support Dashboard</title>
-    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { 
@@ -281,34 +280,10 @@
     </div>
 
     <script>
-        const socket = io();
         const username = "{{ username }}";
         let currentTicket = null;
 
-        socket.on('connect', function() {
-            socket.emit('support_join', {username: username});
-            loadAllTickets();
-        });
-
-        socket.on('new_ticket', function(data) {
-            loadAllTickets();
-        });
-
-        socket.on('new_message', function(data) {
-            console.log('Received new_message:', data);
-            console.log('Current ticket:', currentTicket);
-            if (currentTicket && data.ticket_id === currentTicket) {
-                displayMessage(data);
-            }
-        });
-        
-        socket.on('error', function(data) {
-            alert(data.message);
-        });
-
-        socket.on('ticket_updated', function(data) {
-            loadAllTickets();
-        });
+        loadAllTickets();
 
         function loadAllTickets() {
             fetch('/api/support/tickets')
@@ -380,7 +355,7 @@
                     </div>
                     <h4>${t.subject}</h4>
                     <p style="font-size: 12px; color: #666;">
-                        👤 ${t.user_name} | 💬 ${t.messages.length} messages
+                        👤 ${t.user_name} | 💬 ${t.message_count || 0} messages
                     </p>
                 </div>
             `).join('');
@@ -403,7 +378,7 @@
                     </div>
                     <h4>${t.subject}</h4>
                     <p style="font-size: 12px; color: #666;">
-                        👤 ${t.user_name} | 💬 ${t.messages.length}
+                        👤 ${t.user_name} | 💬 ${t.message_count || 0}
                     </p>
                 </div>
             `).join('');
@@ -426,13 +401,11 @@
                     ticket.messages.forEach(msg => displayMessage(msg));
 
                     document.getElementById('chatModal').style.display = 'block';
-                    socket.emit('join_room', {room: ticketId});
                 });
         }
 
         function closeChat() {
             if (currentTicket) {
-                socket.emit('leave_room', {room: currentTicket});
                 currentTicket = null;
             }
             document.getElementById('chatModal').style.display = 'none';
@@ -450,11 +423,27 @@
                 message: message
             });
 
-            socket.emit('send_message', {
-                ticket_id: currentTicket,
-                sender: username,
-                message: message,
-                sender_type: 'support'
+            fetch(`/api/ticket/${currentTicket}/message`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    sender: username,
+                    message: message,
+                    sender_type: 'support'
+                })
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (!data.success) {
+                    alert(data.error || 'Failed to send message');
+                    return;
+                }
+                if (data.message) {
+                    displayMessage(data.message);
+                }
+                loadAllTickets();
             });
 
             input.value = '';
@@ -463,12 +452,22 @@
         function updateStatus(newStatus) {
             if (!currentTicket) return;
 
-            socket.emit('update_ticket_status', {
-                ticket_id: currentTicket,
-                status: newStatus
+            fetch(`/api/ticket/${currentTicket}/status`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({status: newStatus})
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (!data.success) {
+                    alert(data.error || 'Failed to update status');
+                    return;
+                }
+                document.getElementById('chatStatus').textContent = newStatus;
+                loadAllTickets();
             });
-
-            document.getElementById('chatStatus').textContent = newStatus;
         }
 
         function displayMessage(msg) {

@@ -2,7 +2,6 @@
 <html>
 <head>
     <title>Web11 Support - Admin Dashboard</title>
-    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { 
@@ -283,6 +282,26 @@
             color: #999;
             font-size: 18px;
         }
+
+        .chat-loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            height: 100%;
+            color: #667;
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        .chat-loading-spinner {
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(102, 126, 234, 0.25);
+            border-top-color: #667eea;
+            border-radius: 50%;
+            animation: spin 0.7s linear infinite;
+        }
         
         /* Chat Header */
         .chat-header {
@@ -339,6 +358,26 @@
             min-height: 0;
             max-height: 100%;
         }
+
+        .load-older-wrap {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 15px;
+        }
+
+        .load-older-btn {
+            background: white;
+            border: 1px solid #d0d7de;
+            border-radius: 16px;
+            padding: 8px 14px;
+            cursor: pointer;
+            font-size: 12px;
+            color: #444;
+        }
+
+        .load-older-btn:hover {
+            background: #f8fafc;
+        }
         
         .message {
             margin-bottom: 15px;
@@ -391,7 +430,7 @@
             gap: 10px;
             align-items: center;
         }
-        
+
         .chat-input input {
             flex: 1;
             padding: 10px 15px;
@@ -427,6 +466,25 @@
         .btn-small {
             padding: 6px 12px;
             font-size: 12px;
+        }
+
+        .btn:disabled {
+            opacity: 0.75;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .btn-spinner {
+            width: 12px;
+            height: 12px;
+            border: 2px solid rgba(255, 255, 255, 0.45);
+            border-top-color: #ffffff;
+            border-radius: 50%;
+            display: inline-block;
+            animation: spin 0.7s linear infinite;
+            margin-right: 6px;
+            vertical-align: -1px;
         }
         
         /* User History Panel */
@@ -555,6 +613,11 @@
                 opacity: 0.8;
             }
         }
+
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
         
         /* Scrollbar */
         ::-webkit-scrollbar {
@@ -628,6 +691,7 @@
                 <div style="font-size: 12px; opacity: 0.9;">Admin</div>
                 <div style="font-weight: 600;">{{ username }}</div>
             </div>
+            <button class="btn btn-small" style="background: rgba(255,255,255,0.2);" onclick="manualRefreshTickets()">Refresh</button>
             <form action="/logout" method="POST" style="margin: 0;">
                 <button class="btn btn-small" style="background: rgba(255,255,255,0.2);">Logout</button>
             </form>
@@ -682,12 +746,17 @@
     </div>
 
     <script>
-        const socket = io();
         const username = "{{ username }}";
         const userEmail = "{{ username }}"; // Support email for read tracking
         let allTickets = [];
         let currentTicket = null;
         let currentFilter = 'all';
+        let currentTicketHasMoreMessages = false;
+        let currentTicketNextBefore = null;
+        const MESSAGE_PAGE_SIZE = 30;
+        let ticketsRequestInFlight = false;
+        let pendingTicketReload = false;
+        let isSendingMessage = false;
         
         // Unread message tracking (keep as fallback, but server handles it now)
         function getLastSeenTimestamp(ticketId) {
@@ -728,8 +797,6 @@
             .then(r => r.json())
             .then(data => {
                 console.log('✅ Ticket marked as read:', ticketId, data);
-                // Immediately refresh ticket list to clear unread badge
-                loadAllTickets();
             })
             .catch(err => {
                 console.error('Error marking ticket as read:', err);
@@ -753,109 +820,12 @@
             return unreadMessages.length;
         }
 
-        socket.on('connect', function() {
-            socket.emit('support_join', {username: username});
-            loadAllTickets();
-        });
+        // API-only mode: initial load
+        loadAllTickets();
 
-        socket.on('new_ticket', function(data) {
-            console.log('🎫 New ticket created:', data.ticket_id);
-            
-            // Reload ticket list
-            loadAllTickets();
-            
-            // Show notification
-            const notification = document.createElement('div');
-            notification.style.cssText = `
-                position: fixed;
-                top: 80px;
-                right: 20px;
-                background: #16a349;
-                color: white;
-                padding: 15px 20px;
-                border-radius: 8px;
-                box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-                z-index: 10000;
-                animation: slideIn 0.3s ease-out;
-                font-weight: 600;
-                cursor: pointer;
-            `;
-            notification.innerHTML = `
-                🎫 <strong>New Ticket!</strong><br>
-                <small>${data.ticket_id} - ${data.user_name}</small>
-            `;
-            
-            // Click to open ticket
-            notification.onclick = function() {
-                openChat(data.ticket_id, null);
-                notification.remove();
-            };
-            
-            document.body.appendChild(notification);
-            
-            // Auto-remove after 10 seconds
-            setTimeout(() => {
-                notification.style.animation = 'slideOut 0.3s ease-in';
-                setTimeout(() => notification.remove(), 300);
-            }, 10000);
-            
-            // Play notification sound (optional)
-            try {
-                const audio = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBTGH0fPTgjMGHm7A7+OZQQ0PVKvi7rdlHAU7k9r00X8qBSh+zO/aizYHI2+98OScRA0PWKzn77BdGAU/ltr01IEtBSd8y+7ekDYHJXC/7+KYQAwRWK7m77JfGQU9k9n00n0pBSh8yO3cjTYHJ3C98N+WQgwRWbDm77NfGQU+lNj00H0pBSZ5x+3bjDUHJnG+8OCWQg0RWbDl77RgGgQ+k9f0z3woBSh6yOzajDQHKHK+8N+VQAwPWa/l77RhGgQ/ktb0znsoBSh7x+vaizcGKHK98N+UQQsPV67k7rVjGgM/ktXzzXsoBSZ7x+vaizcGKHK+8OCWQQwPV6vl8LRiGgM/kNTzznsoBSZ6xuvajDcHKHK/8OCVQAwQWKzl8LRiGgM+jdPzznsmBSZ6xu3cjTcHKHO/8N+UQAwQWKzl8LJiGgM+i9DzzXsmBSh7xu3cjDcHKHO+8OGVQQwQWKzl8LJiGgM9itDzzHomBSh7x+3cizcHKHO+8OGVQQwQWK3l8LJhGQM9iM/zzHomBSl7x+3dizcHKHS+8OGVQQ0QWK3l8LJhGQM9h87zzXklBSp8x+3djDcHKHS/8OGVQQ0QWK7l8LJhGQM9h83zzXklBSp8x+3djDcHKHS/8OGVQQ0QWK7l8LJhGQM9h8/zzXkkBSp8yO3djDcHKHW/8OGVQQ0QWK7l8LJhGQM9h8/zzXkkBSp8yO3djDcHKHW/8OGVQQ0QWK7l8LJhGQM9h8/zzXkkBSp8yO3djDcHKHW/8OGVQQ0QWK7l8LJhGQM9h8/zzXkkBSp8yO3djDcHKHW/8OGVQQ0QWK7l8LJhGQM9h8/zzXkkBSp8yO3djDcHKHW/8OGVQQ0QWK7l8LJhGQM9h8/zzXkkBSp8yO3djDcHKHW/8OGVQQ0QWK7l8LJhGQM9h8/zzXkkBSp8yO3djDcHKHW/8OGVQQ0QWK7l8LJhGQ==');
-                audio.volume = 0.3;
-                audio.play().catch(() => {}); // Ignore if autoplay blocked
-            } catch(e) {}
-        });
-
-        socket.on('ticket_marked_read', function(data) {
-            console.log('Ticket marked as read:', data.ticket_id);
-            // Immediately refresh ticket list to clear unread badge
-            loadAllTickets();
-        });
-
-        socket.on('new_message', function(data) {
-            console.log('Received new_message:', data);
-            if (currentTicket && data.ticket_id === currentTicket) {
-                displayMessage(data);
-                // Mark as read if viewing the ticket - use the message timestamp
-                setLastSeenTimestamp(currentTicket, data.timestamp);
-                // Mark as read on backend when viewing
-                markTicketAsReadOnBackend(currentTicket);
-            } else {
-                // If not viewing this ticket, show notification for new unread message
-                if (data.sender_type === 'user') {
-                    showNewMessageNotification(data.ticket_id, data.sender, data.message);
-                }
-            }
-            // Update ticket preview in list (includes unread count)
-            loadAllTickets();
-        });
-
-        socket.on('ticket_updated', function(data) {
-            loadAllTickets();
-            
-            // Show notification if ticket was reopened
-            if (data.reopened) {
-                showReopenedNotification(data.ticket_id);
-            }
-        });
-        
-        socket.on('ticket_reopened', function(data) {
-            // Specific event for ticket reopening
-            loadAllTickets();
-            showReopenedNotification(data.ticket_id, data.user_name);
-        });
-        
-        socket.on('ticket_list_update', function(data) {
-            // Real-time update of ticket list (unread counts, etc)
-            console.log('Ticket list update triggered by new message');
-            // Force refresh to get updated unread counts
-            loadAllTickets();
-        });
-        
-        socket.on('error', function(data) {
-            alert(data.message);
-        });
+        function manualRefreshTickets() {
+            loadAllTickets(isSearching);
+        }
         
         function showReopenedNotification(ticketId, userName) {
             // Create notification element
@@ -960,13 +930,21 @@
         }
 
         function loadAllTickets(includeAll = false) {
+            if (ticketsRequestInFlight) {
+                pendingTicketReload = true;
+                return;
+            }
+
+            ticketsRequestInFlight = true;
             // Pass support email to get unread counts from Redis
             // includeAll=true will load ALL tickets (including resolved/closed) for search
             const status = includeAll ? 'all' : 'active';
             console.log('🔍 Loading tickets with support_email:', userEmail);
-            fetch(`/api/support/tickets?support_email=${encodeURIComponent(userEmail)}&status=${status}`)
+            const limit = includeAll ? 100 : 50;
+            fetch(`/api/support/tickets?support_email=${encodeURIComponent(userEmail)}&status=${status}&include_meta=true&compact=true&limit=${limit}`)
                 .then(r => r.json())
-                .then(tickets => {
+                .then(response => {
+                    const tickets = response.tickets || [];
                     allTickets = tickets;
                     // Debug: Log unread counts
                     tickets.forEach(t => {
@@ -976,6 +954,16 @@
                     });
                     updateCounts(tickets);
                     filterTickets();
+                })
+                .catch(err => {
+                    console.error('Error loading tickets:', err);
+                })
+                .finally(() => {
+                    ticketsRequestInFlight = false;
+                    if (pendingTicketReload) {
+                        pendingTicketReload = false;
+                        loadAllTickets(isSearching);
+                    }
                 });
         }
 
@@ -1121,9 +1109,9 @@
             
             list.innerHTML = tickets.map(t => {
                 const initials = t.user_name.substring(0, 2).toUpperCase();
-                const lastMsg = t.messages.length > 0 ? t.messages[t.messages.length - 1].message : t.description;
+                const lastMsg = t.last_message || '';
                 const preview = lastMsg.substring(0, 50) + (lastMsg.length > 50 ? '...' : '');
-                const time = formatTime(t.updated_at);
+                const time = formatTime(t.last_message_at || t.updated_at);
                 const activeClass = currentTicket === t.ticket_id ? 'active' : '';
                 
                 // Use unread count from server (Redis-based, synced across devices)
@@ -1142,7 +1130,7 @@
                 }
                 
                 return `
-                    <div class="ticket-item ${t.priority} ${activeClass} ${hasUnreadClass}" onclick="openChat('${t.ticket_id}', this)">
+                    <div class="ticket-item ${activeClass} ${hasUnreadClass}" onclick="openChat('${t.ticket_id}', this)">
                         <div class="ticket-avatar">${initials}</div>
                         <div class="ticket-content">
                             <div class="ticket-header">
@@ -1153,9 +1141,8 @@
                             <div class="ticket-subject">${t.subject}</div>
                             <div class="ticket-preview">${preview}</div>
                             <div class="ticket-meta">
-                                <span class="priority-badge ${t.priority}">${t.priority}</span>
                                 <span class="status-badge ${t.status.replace(' ', '.')}">${t.status}</span>
-                                <span class="message-count">💬 ${t.messages.length}</span>
+                                <span class="message-count">💬 ${t.message_count || 0}</span>
                             </div>
                         </div>
                     </div>
@@ -1180,15 +1167,30 @@
 
         function openChat(ticketId, clickedElement) {
             currentTicket = ticketId;
+            currentTicketHasMoreMessages = false;
+            currentTicketNextBefore = null;
+
+            const requestedTicketId = ticketId;
+
+            const chatArea = document.getElementById('chatArea');
+            chatArea.innerHTML = `
+                <div class="chat-loading">
+                    <span class="chat-loading-spinner"></span>
+                    <span>Loading ticket...</span>
+                </div>
+            `;
             
             // Immediately mark ticket as read (before fetching messages)
             markTicketAsReadOnBackend(ticketId);
             
-            fetch('/api/ticket/' + ticketId)
+            fetch(`/api/ticket/${ticketId}?message_limit=${MESSAGE_PAGE_SIZE}`)
                 .then(r => r.json())
                 .then(ticket => {
+                    if (currentTicket !== requestedTicketId) {
+                        return;
+                    }
+
                     displayChatWindow(ticket);
-                    socket.emit('join_room', {room: ticketId});
                     
                     // Mark all messages as read using the latest message timestamp
                     markAllMessagesAsRead(ticket);
@@ -1217,12 +1219,59 @@
                 })
                 .catch(err => {
                     console.error('Error loading ticket:', err);
+                    if (currentTicket === requestedTicketId) {
+                        chatArea.innerHTML = '<div class="chat-placeholder">Failed to load ticket</div>';
+                    }
                 });
+        }
+
+        function loadOlderMessages() {
+            if (!currentTicket || !currentTicketHasMoreMessages || currentTicketNextBefore === null) return;
+
+            const messagesDiv = document.getElementById('chatMessages');
+            if (!messagesDiv) return;
+
+            const previousScrollHeight = messagesDiv.scrollHeight;
+            const previousScrollTop = messagesDiv.scrollTop;
+
+            fetch(`/api/ticket/${currentTicket}?message_limit=${MESSAGE_PAGE_SIZE}&before=${currentTicketNextBefore}`)
+                .then(r => r.json())
+                .then(ticket => {
+                    currentTicketHasMoreMessages = !!ticket.has_more_messages;
+                    currentTicketNextBefore = ticket.next_before;
+                    toggleLoadOlderButton();
+
+                    const existingTimestamps = new Set(
+                        Array.from(messagesDiv.querySelectorAll('[data-message-timestamp]')).map(el => el.dataset.messageTimestamp)
+                    );
+
+                    const fragment = document.createDocumentFragment();
+                    ticket.messages.forEach(msg => {
+                        if (!existingTimestamps.has(msg.timestamp)) {
+                            fragment.appendChild(createMessageElement(msg));
+                        }
+                    });
+
+                    const loadOlderWrap = document.getElementById('loadOlderWrap');
+                    messagesDiv.insertBefore(fragment, loadOlderWrap ? loadOlderWrap.nextSibling : messagesDiv.firstChild);
+                    messagesDiv.scrollTop = messagesDiv.scrollHeight - previousScrollHeight + previousScrollTop;
+                })
+                .catch(err => {
+                    console.error('Error loading older messages:', err);
+                });
+        }
+
+        function toggleLoadOlderButton() {
+            const wrapper = document.getElementById('loadOlderWrap');
+            if (!wrapper) return;
+            wrapper.style.display = currentTicketHasMoreMessages ? 'flex' : 'none';
         }
 
         function displayChatWindow(ticket) {
             const initials = ticket.user_name.substring(0, 2).toUpperCase();
             const userId = ticket.user_id || 'No ID';
+            currentTicketHasMoreMessages = !!ticket.has_more_messages;
+            currentTicketNextBefore = ticket.next_before;
             
             // Create chat window with proper flex structure
             const chatArea = document.getElementById('chatArea');
@@ -1239,17 +1288,23 @@
                         <button class="btn btn-small" style="background: #667eea;" onclick="openUserHistory('${ticket.user_name}')">📜 History</button>
                         <button class="btn btn-small" onclick="updateStatus('In Progress')">Mark In Progress</button>
                         <button class="btn btn-small btn-success" onclick="updateStatus('Resolved')">Resolve</button>
+                        <button class="btn btn-small" style="background: #dc2626;" onclick="deleteCurrentTicket()">Delete</button>
                     </div>
                 </div>
-                <div class="chat-messages" id="chatMessages" style="flex: 1; overflow-y: auto; padding: 20px; padding-bottom: 30px;"></div>
+                <div class="chat-messages" id="chatMessages" style="flex: 1; overflow-y: auto; padding: 20px; padding-bottom: 30px;">
+                    <div class="load-older-wrap" id="loadOlderWrap" style="display: ${currentTicketHasMoreMessages ? 'flex' : 'none'};">
+                        <button class="load-older-btn" onclick="loadOlderMessages()">Load older messages</button>
+                    </div>
+                </div>
                 <div class="chat-input">
                     <input type="text" id="messageInput" placeholder="Type your message..." onkeypress="if(event.key==='Enter') sendMessage()">
-                    <button class="btn" onclick="sendMessage()">Send</button>
+                    <button class="btn" id="sendMessageBtn" onclick="sendMessage()">Send</button>
                 </div>
             `;
             
             // Display messages
             ticket.messages.forEach(msg => displayMessage(msg));
+            toggleLoadOlderButton();
             
             // Scroll to bottom
             const messagesDiv = document.getElementById('chatMessages');
@@ -1258,11 +1313,34 @@
             }
         }
 
+        function updateLocalTicketAfterSupportReply(ticketId, msg) {
+            const idx = allTickets.findIndex(t => t.ticket_id === ticketId);
+            if (idx === -1) return;
+
+            const ticket = allTickets[idx];
+            ticket.last_message = msg.message || ticket.last_message;
+            ticket.last_message_at = msg.timestamp || new Date().toISOString();
+            ticket.updated_at = msg.timestamp || new Date().toISOString();
+            ticket.message_count = (ticket.message_count || 0) + 1;
+            ticket.unread_count = 0;
+
+            // Local re-render only (avoid heavy API call)
+            filterTickets();
+            updateCounts(allTickets);
+        }
+
         function sendMessage() {
             const input = document.getElementById('messageInput');
+            const sendBtn = document.getElementById('sendMessageBtn');
             const message = input.value.trim();
 
-            if (!message || !currentTicket) return;
+            if (!message || !currentTicket || isSendingMessage) return;
+
+            isSendingMessage = true;
+            if (sendBtn) {
+                sendBtn.disabled = true;
+                sendBtn.innerHTML = '<span class="btn-spinner"></span>Sending...';
+            }
 
             console.log('Sending message:', {
                 ticket_id: currentTicket,
@@ -1270,11 +1348,37 @@
                 message: message
             });
 
-            socket.emit('send_message', {
-                ticket_id: currentTicket,
-                sender: username,
-                message: message,
-                sender_type: 'support'
+            fetch(`/api/ticket/${currentTicket}/message`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    sender: username,
+                    message: message,
+                    sender_type: 'support'
+                })
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (!data.success) {
+                    alert(data.error || 'Failed to send message');
+                    return;
+                }
+                if (data.message) {
+                    displayMessage(data.message);
+                    updateLocalTicketAfterSupportReply(currentTicket, data.message);
+                }
+            })
+            .catch(err => {
+                console.error('Error sending message:', err);
+            })
+            .finally(() => {
+                isSendingMessage = false;
+                if (sendBtn) {
+                    sendBtn.disabled = false;
+                    sendBtn.textContent = 'Send';
+                }
             });
 
             // Mark as read when sending a reply (we've obviously seen the messages)
@@ -1286,9 +1390,58 @@
         function updateStatus(newStatus) {
             if (!currentTicket) return;
 
-            socket.emit('update_ticket_status', {
-                ticket_id: currentTicket,
-                status: newStatus
+            fetch(`/api/ticket/${currentTicket}/status`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({status: newStatus})
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (!data.success) {
+                    alert(data.error || 'Failed to update status');
+                    return;
+                }
+                loadAllTickets(isSearching);
+            })
+            .catch(err => {
+                console.error('Error updating status:', err);
+            });
+        }
+
+        function deleteCurrentTicket() {
+            if (!currentTicket) return;
+
+            const ticketIdToDelete = currentTicket;
+            const confirmed = confirm(`Delete ticket ${ticketIdToDelete}? This cannot be undone.`);
+            if (!confirmed) return;
+
+            fetch(`/api/ticket/${ticketIdToDelete}`, {
+                method: 'DELETE'
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (!data.success) {
+                    alert(data.error || 'Failed to delete ticket');
+                    return;
+                }
+
+                allTickets = allTickets.filter(t => t.ticket_id !== ticketIdToDelete);
+                updateCounts(allTickets);
+                filterTickets();
+
+                currentTicket = null;
+                currentTicketHasMoreMessages = false;
+                currentTicketNextBefore = null;
+                document.getElementById('chatArea').innerHTML = `
+                    <div class="chat-placeholder">
+                        👈 Select a ticket to start chatting
+                    </div>
+                `;
+            })
+            .catch(err => {
+                console.error('Error deleting ticket:', err);
             });
         }
 
@@ -1296,8 +1449,15 @@
             const messagesDiv = document.getElementById('chatMessages');
             if (!messagesDiv) return;
             
+            const messageEl = createMessageElement(msg);
+            messagesDiv.appendChild(messageEl);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+
+        function createMessageElement(msg) {
             const messageEl = document.createElement('div');
             messageEl.className = 'message ' + msg.sender_type;
+            messageEl.dataset.messageTimestamp = msg.timestamp;
             
             // Check if message is a URL (file/image)
             const messageText = msg.message;
@@ -1338,8 +1498,7 @@
                     <div class="message-time">${new Date(msg.timestamp).toLocaleTimeString()}</div>
                 </div>
             `;
-            messagesDiv.appendChild(messageEl);
-            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+            return messageEl;
         }
         
         // User History Functions
@@ -1355,9 +1514,10 @@
             panel.classList.add('open');
             
             // Load user's ticket history
-            fetch(`/api/user/tickets?username=${encodeURIComponent(userName)}`)
+            fetch(`/api/user/tickets?username=${encodeURIComponent(userName)}&include_meta=true&limit=100`)
                 .then(r => r.json())
-                .then(tickets => {
+                .then(response => {
+                    const tickets = response.tickets || [];
                     displayUserHistory(tickets, userName);
                 })
                 .catch(err => {
@@ -1395,7 +1555,7 @@
                 const isCurrent = currentTicket === ticket.ticket_id;
                 const statusClass = ticket.status.replace(' ', '.');
                 const date = new Date(ticket.created_at).toLocaleDateString();
-                const messagesCount = ticket.messages ? ticket.messages.length : 0;
+                const messagesCount = ticket.message_count || 0;
                 
                 html += `
                     <div class="history-ticket ${isCurrent ? 'current' : ''}" onclick="openChat('${ticket.ticket_id}', this)">
