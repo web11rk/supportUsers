@@ -671,6 +671,57 @@
                 opacity: 0;
             }
         }
+        /* Pagination Bar Styling */
+        #paginationBar {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 6px;
+            padding: 10px 0;
+            background: #fff;
+            border-top: 1px solid #eee;
+            min-height: 48px;
+        }
+        #paginationBar button {
+            background: #f0f2f5;
+            border: 1px solid #d1d5db;
+            color: #333;
+            border-radius: 8px;
+            padding: 7px 16px;
+            margin: 0 2px;
+            font-size: 15px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background 0.2s, color 0.2s, box-shadow 0.2s, border 0.2s;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+            outline: none;
+        }
+        #paginationBar button[disabled] {
+            background: #e5e7eb;
+            color: #aaa;
+            border: 1px solid #e5e7eb;
+            cursor: not-allowed;
+            box-shadow: none;
+        }
+        #paginationBar button:not([disabled]):hover {
+            background: #667eea;
+            color: #fff;
+            border: 1px solid #667eea;
+            box-shadow: 0 2px 8px rgba(102,126,234,0.10);
+        }
+        #paginationBar button.active, #paginationBar button[style*='font-weight:bold'] {
+            background: #667eea !important;
+            color: #fff !important;
+            border: 1.5px solid #667eea !important;
+            font-weight: 700 !important;
+            box-shadow: 0 2px 8px rgba(102,126,234,0.13);
+        }
+        @media (max-width: 600px) {
+            #paginationBar button {
+                padding: 6px 10px;
+                font-size: 13px;
+            }
+        }
     </style>
 </head>
 <body>
@@ -735,6 +786,8 @@
             <div class="ticket-list" id="ticketList">
                 <div class="no-tickets">No tickets found</div>
             </div>
+            <!-- Pagination Bar -->
+            <div id="paginationBar" style="padding: 10px 0; text-align: center; background: #fff; border-top: 1px solid #eee;"></div>
         </div>
 
         <!-- Right Side - Chat Area -->
@@ -757,6 +810,9 @@
         let ticketsRequestInFlight = false;
         let pendingTicketReload = false;
         let isSendingMessage = false;
+        let currentPage = 1;
+        let totalPages = 1;
+        let lastSearchTerm = '';
         
         // Unread message tracking (keep as fallback, but server handles it now)
         function getLastSeenTimestamp(ticketId) {
@@ -824,7 +880,11 @@
         loadAllTickets();
 
         function manualRefreshTickets() {
-            loadAllTickets(isSearching);
+            if (isSearching && lastSearchTerm) {
+                loadTicketsWithSearch(lastSearchTerm, currentPage);
+            } else {
+                loadAllTickets(false, currentPage);
+            }
         }
         
         function showReopenedNotification(ticketId, userName) {
@@ -929,31 +989,31 @@
             }, 5000);
         }
 
-        function loadAllTickets(includeAll = false) {
+        function loadAllTickets(includeAll = false, page = 1) {
             if (ticketsRequestInFlight) {
                 pendingTicketReload = true;
                 return;
             }
 
             ticketsRequestInFlight = true;
-            // Pass support email to get unread counts from Redis
-            // includeAll=true will load ALL tickets (including resolved/closed) for search
             const status = includeAll ? 'all' : 'active';
-            console.log('🔍 Loading tickets with support_email:', userEmail);
             const limit = includeAll ? 100 : 50;
-            fetch(`/api/support/tickets?support_email=${encodeURIComponent(userEmail)}&status=${status}&include_meta=true&compact=true&limit=${limit}`)
+            fetch(`/api/support/tickets?support_email=${encodeURIComponent(userEmail)}&status=${status}&include_meta=true&compact=true&limit=${limit}&page=${page}`)
                 .then(r => r.json())
                 .then(response => {
                     const tickets = response.tickets || [];
                     allTickets = tickets;
-                    // Debug: Log unread counts
-                    tickets.forEach(t => {
-                        if (t.unread_count > 0) {
-                            console.log(`📬 Ticket ${t.ticket_id}: ${t.unread_count} unread messages`);
-                        }
-                    });
                     updateCounts(tickets);
-                    filterTickets();
+                    renderFilteredTickets(tickets);
+                    // Pagination
+                    if (response.pagination) {
+                        currentPage = response.pagination.page || 1;
+                        totalPages = response.pagination.total_pages || 1;
+                    } else {
+                        currentPage = 1;
+                        totalPages = 1;
+                    }
+                    renderPaginationBar();
                 })
                 .catch(err => {
                     console.error('Error loading tickets:', err);
@@ -962,7 +1022,7 @@
                     ticketsRequestInFlight = false;
                     if (pendingTicketReload) {
                         pendingTicketReload = false;
-                        loadAllTickets(isSearching);
+                        loadAllTickets(isSearching, currentPage);
                     }
                 });
         }
@@ -998,104 +1058,121 @@
 
         function setFilter(filter) {
             currentFilter = filter;
-            
-            // Update active tab
-            document.querySelectorAll('.filter-tab').forEach(tab => {
-                tab.classList.remove('active');
-            });
+            document.querySelectorAll('.filter-tab').forEach(tab => tab.classList.remove('active'));
             event.target.closest('.filter-tab').classList.add('active');
-            
-            filterTickets();
+            renderFilteredTickets(allTickets);
         }
 
         let isSearching = false;
-        
+        let searchDebounceTimer = null;
+
+        // Called on every keyup in the search box
         function filterTickets() {
-            const searchTerm = document.getElementById('searchInput').value.toLowerCase().trim();
+            const searchTerm = document.getElementById('searchInput').value.trim();
             const searchIndicator = document.getElementById('searchIndicator');
-            
-            // Show/hide search indicator
+
             if (searchTerm) {
                 searchIndicator.style.display = 'block';
             } else {
                 searchIndicator.style.display = 'none';
             }
-            
-            // If user is searching, load ALL tickets (including old/resolved ones)
-            if (searchTerm && !isSearching) {
-                isSearching = true;
-                loadAllTickets(true);  // Load all tickets including resolved/closed
-                return;
-            } else if (!searchTerm && isSearching) {
-                isSearching = false;
-                loadAllTickets(false);  // Back to active tickets only
-                return;
-            }
-            
-            let filtered = allTickets.filter(t => {
-                // Filter by status (only if NOT searching)
-                if (!searchTerm) {
-                    if (currentFilter === 'open' && t.status !== 'Open') return false;
-                    if (currentFilter === 'inprogress' && t.status !== 'In Progress') return false;
-                    if (currentFilter === 'critical' && t.priority !== 'CRITICAL') return false;
-                    if (currentFilter === 'all' && t.status !== 'Open' && t.status !== 'In Progress') return false;
-                }
-                
-                // Filter by search term (searches ALL tickets when searchTerm exists)
+
+            // Debounce: wait 350ms after user stops typing before hitting the server
+            clearTimeout(searchDebounceTimer);
+            searchDebounceTimer = setTimeout(() => {
                 if (searchTerm) {
-                    const matchesUser = t.user_name.toLowerCase().includes(searchTerm);
-                    const matchesUserId = (t.user_id || '').toLowerCase().includes(searchTerm);
-                    const matchesTicket = t.ticket_id.toLowerCase().includes(searchTerm);
-                    const matchesSubject = t.subject.toLowerCase().includes(searchTerm);
-                    const matchesDescription = (t.description || '').toLowerCase().includes(searchTerm);
-                    
-                    // Also match email domains (e.g., searching "gmail" finds "user@gmail.com")
-                    const matchesEmail = t.user_name.toLowerCase().includes(searchTerm) || 
-                                        t.user_name.toLowerCase().split('@')[1]?.includes(searchTerm);
-                    
-                    if (!matchesUser && !matchesUserId && !matchesTicket && !matchesSubject && !matchesDescription && !matchesEmail) {
-                        return false;
+                    isSearching = true;
+                    loadTicketsWithSearch(searchTerm);
+                } else {
+                    if (isSearching) {
+                        isSearching = false;
+                        loadAllTickets(false); // back to active-only
+                    } else {
+                        // just re-render from already-loaded data
+                        renderFilteredTickets(allTickets);
                     }
                 }
-                
-                return true;
+            }, 350);
+        }
+
+        // Server-side search — calls ?q=term so backend searches ALL tickets
+        function loadTicketsWithSearch(term, page = 1) {
+            if (ticketsRequestInFlight) {
+                pendingTicketReload = true;
+                return;
+            }
+            ticketsRequestInFlight = true;
+            lastSearchTerm = term;
+            fetch(`/api/support/tickets?q=${encodeURIComponent(term)}&include_meta=true&compact=true&page=${page}`)
+                .then(r => r.json())
+                .then(response => {
+                    const tickets = response.tickets || response; // handle both wrapped and bare
+                    allTickets = Array.isArray(tickets) ? tickets : [];
+                    updateCounts(allTickets);
+                    renderFilteredTickets(allTickets);
+                    // Pagination
+                    if (response.pagination) {
+                        currentPage = response.pagination.page || 1;
+                        totalPages = response.pagination.total_pages || 1;
+                    } else {
+                        currentPage = 1;
+                        totalPages = 1;
+                    }
+                    renderPaginationBar();
+                })
+                .catch(err => console.error('Search error:', err))
+                .finally(() => {
+                    ticketsRequestInFlight = false;
+                    if (pendingTicketReload) {
+                        pendingTicketReload = false;
+                        const current = document.getElementById('searchInput').value.trim();
+                        if (current) loadTicketsWithSearch(current, currentPage);
+                        else loadAllTickets(isSearching, currentPage);
+                    }
+                });
+        }
+
+        function renderPaginationBar() {
+            const bar = document.getElementById('paginationBar');
+            if (totalPages <= 1) {
+                bar.innerHTML = '';
+                return;
+            }
+            let html = '';
+            // Show prev button
+            html += `<button onclick="gotoPage(${Math.max(1, currentPage-1)})" ${currentPage===1?'disabled':''} style="margin-right:6px;">&laquo;</button>`;
+            // Show up to 5 page numbers, centered on current
+            let start = Math.max(1, currentPage-2);
+            let end = Math.min(totalPages, start+4);
+            if (end-start<4) start = Math.max(1, end-4);
+            for (let i=start; i<=end; i++) {
+                html += `<button onclick="gotoPage(${i})" ${i===currentPage?'style=\'font-weight:bold;background:#e0e7ff;\'':''}>${i}</button>`;
+            }
+            // Show next button
+            html += `<button onclick="gotoPage(${Math.min(totalPages, currentPage+1)})" ${currentPage===totalPages?'disabled':''} style="margin-left:6px;">&raquo;</button>`;
+            bar.innerHTML = html;
+        }
+
+        function gotoPage(page) {
+            if (page < 1 || page > totalPages || page === currentPage) return;
+            currentPage = page;
+            if (isSearching && lastSearchTerm) {
+                loadTicketsWithSearch(lastSearchTerm, page);
+            } else {
+                loadAllTickets(false, page);
+            }
+        }
+
+        // Render already-loaded allTickets through the active filter tab (no API call)
+        function renderFilteredTickets(tickets) {
+            let filtered = tickets.filter(t => {
+                if (isSearching) return true; // show all results when searching
+                if (currentFilter === 'open')       return t.status === 'Open';
+                if (currentFilter === 'inprogress') return t.status === 'In Progress';
+                if (currentFilter === 'critical')   return t.priority === 'CRITICAL' && (t.status === 'Open' || t.status === 'In Progress');
+                // 'all' tab: active only
+                return t.status === 'Open' || t.status === 'In Progress';
             });
-            
-            // Sort by status, priority, and date
-            const priorityOrder = {'CRITICAL': 4, 'HIGH': 3, 'MEDIUM': 2, 'LOW': 1};
-            const statusPriority = {
-                'Open': 1,
-                'In Progress': 2,
-                'Resolved': 3,
-                'Closed': 4
-            };
-            
-            filtered.sort((a, b) => {
-                // Priority 1: Status (Open/In Progress first)
-                const aStatusPriority = statusPriority[a.status] || 5;
-                const bStatusPriority = statusPriority[b.status] || 5;
-                
-                if (aStatusPriority !== bStatusPriority) {
-                    return aStatusPriority - bStatusPriority;
-                }
-                
-                // Priority 2: If searching, sort by date (newest first)
-                if (searchTerm) {
-                    return new Date(b.created_at) - new Date(a.created_at);
-                }
-                
-                // Priority 3: Sort by priority
-                const aPriority = priorityOrder[a.priority] || 0;
-                const bPriority = priorityOrder[b.priority] || 0;
-                
-                if (aPriority !== bPriority) {
-                    return bPriority - aPriority;
-                }
-                
-                // Priority 4: Sort by date (newest first)
-                return new Date(b.created_at) - new Date(a.created_at);
-            });
-            
             displayTickets(filtered);
         }
 
@@ -1325,7 +1402,7 @@
             ticket.unread_count = 0;
 
             // Local re-render only (avoid heavy API call)
-            filterTickets();
+            renderFilteredTickets(allTickets);
             updateCounts(allTickets);
         }
 
@@ -1495,7 +1572,7 @@
             messageEl.innerHTML = `
                 <div class="message-bubble">
                     <strong>${msg.sender}:</strong> ${messageContent}
-                    <div class="message-time">${new Date(msg.timestamp).toLocaleTimeString()}</div>
+                    <div class="message-time">${msg.timestamp}, Time:- ${new Date(msg.timestamp).toLocaleTimeString()}</div>
                 </div>
             `;
             return messageEl;

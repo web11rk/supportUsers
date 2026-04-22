@@ -1183,11 +1183,62 @@ def api_user_tickets():
 @app.route('/api/support/tickets')
 @limiter.limit("60 per minute")
 def api_support_tickets():
-    support_email = request.args.get('support_email', 'support')  # kept for API compatibility
-    status_filter = request.args.get('status', 'active')  # Filter: 'all', 'active', 'resolved'
+    support_email = request.args.get('support_email', 'support')
+    status_filter = request.args.get('status', 'active')
     include_meta = request.args.get('include_meta', 'false').lower() == 'true'
     compact = request.args.get('compact', 'false').lower() == 'true'
+    search_query = request.args.get('q', '').strip().lower()
     page, limit = get_request_pagination()
+
+    # ── Server-side search ──────────────────────────────────────────────────
+    if search_query:
+        # Load all IDs from the all-sorted set, batch-fetch summary fields
+        all_ids_raw = ticket_manager.redis.zrevrange(ticket_manager.all_sorted_key, 0, -1)
+        ids = [tid.decode() if isinstance(tid, bytes) else tid for tid in all_ids_raw]
+
+        if not ids:
+            return jsonify([])
+
+        # Pipeline: only fetch the fields we need for search
+        search_fields = ['ticket_id', 'user_name', 'subject', 'status',
+                         'created_at', 'updated_at', 'message_count',
+                         'last_message', 'last_message_at', 'unread_count']
+        pipe = ticket_manager.redis.pipeline(transaction=False)
+        for tid in ids:
+            pipe.hmget(f"{ticket_manager.ticket_prefix}{tid}", search_fields)
+        rows = pipe.execute()
+
+        results = []
+        for row in rows:
+            if not row or not row[0]:
+                continue
+            ticket_id  = (row[0].decode() if isinstance(row[0], bytes) else row[0]) or ''
+            user_name  = (row[1].decode() if isinstance(row[1], bytes) else row[1]) or ''
+            subject    = (row[2].decode() if isinstance(row[2], bytes) else row[2]) or ''
+            status     = (row[3].decode() if isinstance(row[3], bytes) else row[3]) or ''
+
+            if (search_query in ticket_id.lower() or
+                search_query in user_name.lower() or
+                search_query in subject.lower()):
+
+                t = {
+                    'ticket_id':      ticket_id,
+                    'user_name':      user_name,
+                    'subject':        subject,
+                    'status':         status,
+                    'created_at':     (row[4].decode() if isinstance(row[4], bytes) else row[4]) or '',
+                    'updated_at':     (row[5].decode() if isinstance(row[5], bytes) else row[5]) or '',
+                    'message_count':  int((row[6].decode() if isinstance(row[6], bytes) else row[6]) or 0),
+                    'last_message':   (row[7].decode() if isinstance(row[7], bytes) else row[7]) or '',
+                    'last_message_at':(row[8].decode() if isinstance(row[8], bytes) else row[8]) or '',
+                    'unread_count':   read_status_manager.get_unread_count_by_ticket_id(ticket_id, 'support'),
+                }
+                results.append(t)
+
+        if include_meta:
+            return jsonify({'tickets': results, 'pagination': {'page': 1, 'limit': len(results), 'total': len(results), 'has_more': False, 'total_pages': 1}})
+        return jsonify(results)
+    # ───────────────────────────────────────────────────────────────────────
 
     # Pick sorted set by filter — ZREVRANGE gives latest-first page without loading all tickets
     if status_filter == 'active':
